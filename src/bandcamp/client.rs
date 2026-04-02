@@ -119,6 +119,9 @@ impl BandcampClient {
                     art_url: item.item_art_url.clone(),
                     date_added: item.added.clone(),
                     tracks: Vec::new(),
+                    about: None,
+                    credits: None,
+                    release_date: None,
                 };
                 albums.push(album);
             }
@@ -135,8 +138,8 @@ impl BandcampClient {
         Ok(albums)
     }
 
-    /// Fetch track listing and stream URLs for an album
-    pub async fn fetch_album_tracks(&self, album_url: &str) -> Result<Vec<Track>> {
+    /// Fetch track listing, stream URLs, and album metadata
+    pub async fn fetch_album_details(&self, album_url: &str) -> Result<AlbumDetail> {
         let resp = self
             .http
             .get(album_url)
@@ -147,13 +150,19 @@ impl BandcampClient {
             .context("Failed to fetch album page")?;
 
         let body = resp.text().await?;
-        parse_tracks_from_page(&body)
+        parse_album_page(&body)
     }
 
 }
 
-fn parse_tracks_from_page(html: &str) -> Result<Vec<Track>> {
-    // Look for data-tralbum attribute which contains track info as JSON
+pub struct AlbumDetail {
+    pub tracks: Vec<Track>,
+    pub about: Option<String>,
+    pub credits: Option<String>,
+    pub release_date: Option<String>,
+}
+
+fn parse_album_page(html: &str) -> Result<AlbumDetail> {
     let tralbum_json = extract_data_tralbum(html)
         .context("Could not find track data on album page")?;
 
@@ -179,7 +188,17 @@ fn parse_tracks_from_page(html: &str) -> Result<Vec<Track>> {
         })
         .collect();
 
-    Ok(tracks)
+    let (about, credits, release_date) = match data.current {
+        Some(current) => (current.about, current.credits, current.release_date),
+        None => (None, None, None),
+    };
+
+    Ok(AlbumDetail {
+        tracks,
+        about,
+        credits,
+        release_date,
+    })
 }
 
 fn extract_data_tralbum(html: &str) -> Option<String> {

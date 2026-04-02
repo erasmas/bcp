@@ -9,6 +9,9 @@ pub struct Album {
     pub art_url: Option<String>,
     pub date_added: Option<String>,
     pub tracks: Vec<Track>,
+    pub about: Option<String>,
+    pub credits: Option<String>,
+    pub release_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +52,14 @@ pub struct CollectionItem {
 #[derive(Debug, Deserialize)]
 pub struct TralbumData {
     pub trackinfo: Option<Vec<TrackInfo>>,
+    pub current: Option<TralbumCurrent>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TralbumCurrent {
+    pub about: Option<String>,
+    pub credits: Option<String>,
+    pub release_date: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

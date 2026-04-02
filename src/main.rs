@@ -117,7 +117,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
     let mut app = App::new();
     app.init().await?;
 
-    let mut events = EventHandler::new(Duration::from_millis(200));
+    let mut events = EventHandler::new(Duration::from_millis(500));
 
     // If we have auth, kick off collection loading
     let needs_load = app.screen == app::AppScreen::Loading;
@@ -154,7 +154,10 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                 }
             }
 
-            terminal.draw(|f| app.draw(f))?;
+            if app.dirty {
+                terminal.draw(|f| app.draw(f))?;
+                app.dirty = false;
+            }
         }
     }
 

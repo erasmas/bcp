@@ -47,6 +47,7 @@ pub struct App {
     pub queue_state: ListState,
     pub selected_album_idx: Option<usize>,
     pub is_paused: bool,
+    pub meta_scroll: Option<usize>,  // None = auto-scroll, Some(n) = manual offset
     pub elapsed: f64,
     pub play_started: Option<Instant>,
     pub pause_accumulated: f64,
@@ -54,12 +55,13 @@ pub struct App {
     pub filter_mode: bool,
     pub status_msg: String,
     pub should_quit: bool,
+    pub dirty: bool,
     pub auth: Option<AuthData>,
     pub login_step: LoginStep,
-    pub waveform: Vec<u64>,
-    waveform_rx: Option<tokio::sync::oneshot::Receiver<Vec<u64>>>,
     pub art_protocol: Option<StatefulProtocol>,
     pub art_picker: Option<Picker>,
+    mp3_rx: Option<tokio::sync::oneshot::Receiver<Result<Vec<u8>>>>,
+    art_rx: Option<tokio::sync::oneshot::Receiver<Option<image::DynamicImage>>>,
     engine: Option<AudioEngine>,
     client: Option<BandcampClient>,
 }
@@ -83,6 +85,7 @@ impl App {
             queue_state: ListState::default(),
             selected_album_idx: None,
             is_paused: false,
+            meta_scroll: None,
             elapsed: 0.0,
             play_started: None,
             pause_accumulated: 0.0,
@@ -90,12 +93,13 @@ impl App {
             filter_mode: false,
             status_msg: String::new(),
             should_quit: false,
+            dirty: true,
             auth: None,
             login_step: LoginStep::Prompt,
-            waveform: Vec::new(),
-            waveform_rx: None,
             art_protocol: None,
             art_picker: Picker::from_query_stdio().ok(),
+            mp3_rx: None,
+            art_rx: None,
             engine: None,
             client: None,
         }
@@ -170,7 +174,10 @@ impl App {
 
     pub async fn handle_event(&mut self, event: AppEvent) -> Result<()> {
         match event {
-            AppEvent::Key(key) => self.handle_key(key).await?,
+            AppEvent::Key(key) => {
+                self.handle_key(key).await?;
+                self.dirty = true;
+            }
             AppEvent::Tick => self.handle_tick().await?,
         }
         Ok(())
@@ -180,11 +187,15 @@ impl App {
         // Update elapsed time
         if let Some(started) = self.play_started {
             if !self.is_paused {
-                self.elapsed = started.elapsed().as_secs_f64() - self.pause_accumulated;
+                let new_elapsed = started.elapsed().as_secs_f64() - self.pause_accumulated;
+                if (new_elapsed - self.elapsed).abs() > 0.1 {
+                    self.elapsed = new_elapsed;
+                    self.dirty = true;
+                }
             }
         }
 
-        // Check for player events — collect first to avoid borrow conflict
+        // Check for player events
         let mut track_finished = false;
         if let Some(ref mut engine) = self.engine {
             while let Ok(event) = engine.event_rx.try_recv() {
@@ -194,20 +205,51 @@ impl App {
                     }
                     PlayerEvent::Error(e) => {
                         self.status_msg = format!("Playback error: {}", e);
+                        self.dirty = true;
                     }
                     _ => {}
                 }
             }
         }
         if track_finished {
-            self.play_next().await?;
+            self.play_next();
         }
 
-        // Check for waveform result from background thread
-        if let Some(ref mut rx) = self.waveform_rx {
-            if let Ok(wf) = rx.try_recv() {
-                self.waveform = wf;
-                self.waveform_rx = None;
+        // Check for MP3 download result
+        if let Some(ref mut rx) = self.mp3_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.mp3_rx = None;
+                match result {
+                    Ok(data) => {
+                        if let Some(ref engine) = self.engine {
+                            engine.play(data)?;
+                            self.is_paused = false;
+                            self.play_started = Some(Instant::now());
+                            self.pause_accumulated = 0.0;
+                            self.elapsed = 0.0;
+                            self.meta_scroll = None;
+                            self.status_msg = String::new();
+                            self.dirty = true;
+                        }
+                    }
+                    Err(e) => {
+                        self.status_msg = format!("Stream error: {}", e);
+                        self.dirty = true;
+                    }
+                }
+            }
+        }
+
+        // Check for art download result
+        if let Some(ref mut rx) = self.art_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.art_rx = None;
+                if let Some(img) = result {
+                    if let Some(ref mut picker) = self.art_picker {
+                        self.art_protocol = Some(picker.new_resize_protocol(img));
+                        self.dirty = true;
+                    }
+                }
             }
         }
 
@@ -298,8 +340,26 @@ impl App {
             KeyCode::Char('G') => self.move_to_bottom(),
             KeyCode::Enter => self.handle_enter().await?,
             KeyCode::Char(' ') => self.toggle_pause()?,
-            KeyCode::Char('n') => self.play_next().await?,
-            KeyCode::Char('p') => self.play_prev().await?,
+            KeyCode::Char('n') => self.play_next(),
+            KeyCode::Char('p') => self.play_prev(),
+            KeyCode::Char('J') => {
+                // Scroll metadata text down
+                let offset = self.meta_scroll.unwrap_or(0);
+                self.meta_scroll = Some(offset + 1);
+            }
+            KeyCode::Char('K') => {
+                // Scroll metadata text up
+                let offset = self.meta_scroll.unwrap_or(0);
+                self.meta_scroll = Some(offset.saturating_sub(1));
+            }
+            KeyCode::Tab => {
+                // Toggle auto-scroll / manual
+                if self.meta_scroll.is_some() {
+                    self.meta_scroll = None; // back to auto
+                } else {
+                    self.meta_scroll = Some(0); // manual at top
+                }
+            }
             KeyCode::Char('s') => {
                 self.queue.shuffle = !self.queue.shuffle;
                 self.status_msg = format!(
@@ -451,17 +511,20 @@ impl App {
                     }
                 };
 
-                // Fetch tracks if not already loaded
+                // Fetch tracks and metadata if not already loaded
                 if self.albums[actual_idx].tracks.is_empty() {
-                    self.status_msg = "Loading tracks...".to_string();
+                    self.status_msg = "Loading album...".to_string();
                     let url = self.albums[actual_idx].item_url.clone();
                     if let Some(ref client) = self.client {
-                        match client.fetch_album_tracks(&url).await {
-                            Ok(tracks) => {
-                                self.albums[actual_idx].tracks = tracks;
+                        match client.fetch_album_details(&url).await {
+                            Ok(detail) => {
+                                self.albums[actual_idx].tracks = detail.tracks;
+                                self.albums[actual_idx].about = detail.about;
+                                self.albums[actual_idx].credits = detail.credits;
+                                self.albums[actual_idx].release_date = detail.release_date;
                             }
                             Err(e) => {
-                                self.status_msg = format!("Failed to load tracks: {}", e);
+                                self.status_msg = format!("Failed to load album: {}", e);
                                 return Ok(());
                             }
                         }
@@ -492,104 +555,87 @@ impl App {
                         album_title: album.album_title.clone(),
                         artist_name: album.artist_name.clone(),
                         art_url: album.art_url.clone(),
+                        about: album.about.clone(),
+                        credits: album.credits.clone(),
+                        release_date: album.release_date.clone(),
                     })
                     .collect();
 
                 self.queue.replace_all(items, track_idx);
-                self.play_current().await?;
+                self.start_playback();
             }
             View::Queue => {
                 if let Some(selected) = self.queue_state.selected() {
                     self.queue.current = Some(selected);
-                    self.play_current().await?;
+                    self.start_playback();
                 }
             }
         }
         Ok(())
     }
 
-    async fn play_current(&mut self) -> Result<()> {
-        self.init_audio()?;
+    fn start_playback(&mut self) {
+        self.init_audio().ok();
 
         let Some(item) = self.queue.current_item() else {
-            return Ok(());
+            return;
         };
 
         let Some(ref url) = item.track.stream_url else {
             self.status_msg = "No stream URL for this track".to_string();
-            return Ok(());
+            return;
         };
 
-        let stream_url = url.clone();
-        let art_url = item.art_url.clone();
         self.status_msg = format!("Buffering: {} - {}...", item.artist_name, item.track.title);
+        self.dirty = true;
 
-        let client = reqwest::Client::new();
-
-        // Fetch album art
-        if let Some(ref art) = art_url {
-            // Use _2 suffix for large size (~1024px)
-            let art_sized = art.replace("_16.", "_2.");
-            if let Ok(resp) = client.get(&art_sized).send().await {
-                if let Ok(bytes) = resp.bytes().await {
-                    if let Ok(img) = image::load_from_memory(&bytes) {
-                        if let Some(ref mut picker) = self.art_picker {
-                            self.art_protocol =
-                                Some(picker.new_resize_protocol(img));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Download and play the MP3 data
-        match client.get(&stream_url).send().await {
-            Ok(resp) => {
+        // Spawn MP3 download in background
+        let stream_url = url.clone();
+        let (mp3_tx, mp3_rx) = tokio::sync::oneshot::channel();
+        self.mp3_rx = Some(mp3_rx);
+        tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            let result = async {
+                let resp = client.get(&stream_url).send().await?;
                 let bytes = resp.bytes().await?;
-                let data = bytes.to_vec();
+                Ok(bytes.to_vec()) as Result<Vec<u8>>
+            }
+            .await;
+            let _ = mp3_tx.send(result);
+        });
 
-                // Start playback immediately
-                if let Some(ref engine) = self.engine {
-                    engine.play(data.clone())?;
-                    self.is_paused = false;
-                    self.play_started = Some(Instant::now());
-                    self.pause_accumulated = 0.0;
-                    self.elapsed = 0.0;
-                    self.status_msg = String::new();
+        // Spawn art download in background
+        let art_url = item.art_url.clone();
+        if let Some(art) = art_url {
+            let art_sized = art.replace("_16.", "_5.");
+            let (art_tx, art_rx) = tokio::sync::oneshot::channel();
+            self.art_rx = Some(art_rx);
+            tokio::spawn(async move {
+                let client = reqwest::Client::new();
+                let result = async {
+                    let resp = client.get(&art_sized).send().await.ok()?;
+                    let bytes = resp.bytes().await.ok()?;
+                    image::load_from_memory(&bytes).ok()
                 }
-
-                // Extract waveform in background thread
-                self.waveform.clear();
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                self.waveform_rx = Some(rx);
-                tokio::task::spawn_blocking(move || {
-                    let wf = crate::player::waveform::extract_waveform(&data);
-                    let _ = tx.send(wf);
-                });
-            }
-            Err(e) => {
-                self.status_msg = format!("Stream error: {}", e);
-            }
+                .await;
+                let _ = art_tx.send(result);
+            });
         }
-
-        Ok(())
     }
 
-    async fn play_next(&mut self) -> Result<()> {
+    fn play_next(&mut self) {
         if self.queue.next().is_some() {
-            self.play_current().await?;
+            self.start_playback();
         } else {
             self.status_msg = "End of queue".to_string();
             self.play_started = None;
         }
-        Ok(())
     }
 
-    async fn play_prev(&mut self) -> Result<()> {
+    fn play_prev(&mut self) {
         if self.queue.prev().is_some() {
-            self.play_current().await?;
+            self.start_playback();
         }
-        Ok(())
     }
 
     fn toggle_pause(&mut self) -> Result<()> {
@@ -682,7 +728,7 @@ impl App {
             is_paused: self.is_paused,
             elapsed: self.elapsed,
             has_art,
-            waveform: &self.waveform,
+            meta_scroll: self.meta_scroll,
         };
         let np_area = chunks[0];
         frame.render_widget(now_playing, np_area);

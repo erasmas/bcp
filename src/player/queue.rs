@@ -6,6 +6,9 @@ pub struct QueueItem {
     pub album_title: String,
     pub artist_name: String,
     pub art_url: Option<String>,
+    pub about: Option<String>,
+    pub credits: Option<String>,
+    pub release_date: Option<String>,
 }
 
 #[derive(Debug)]

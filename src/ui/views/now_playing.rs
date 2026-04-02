@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::player::queue::QueueItem;
 use crate::ui::theme;
-use crate::ui::widgets::{format_duration, Waveform};
+use crate::ui::widgets::format_duration;
 
 /// Minimum percentage of the now-playing bar width reserved for album art
 const ART_PERCENT: u16 = 30;
@@ -18,7 +18,7 @@ pub struct NowPlayingBar<'a> {
     pub is_paused: bool,
     pub elapsed: f64,
     pub has_art: bool,
-    pub waveform: &'a [u64],
+    pub meta_scroll: Option<usize>,  // None = auto, Some(n) = manual offset
 }
 
 impl<'a> NowPlayingBar<'a> {
@@ -74,14 +74,7 @@ impl<'a> Widget for NowPlayingBar<'a> {
                     width: inner.width.saturating_sub(art_offset),
                     height: inner.height,
                 };
-                render_playing(
-                    info_area,
-                    buf,
-                    item,
-                    self.is_paused,
-                    self.elapsed,
-                    self.waveform,
-                );
+                render_playing(info_area, buf, item, self.is_paused, self.elapsed, self.meta_scroll);
             }
             None => {
                 let msg = "No track playing \u{2014} select an album and press Enter";
@@ -97,7 +90,7 @@ fn render_playing(
     item: &QueueItem,
     is_paused: bool,
     elapsed: f64,
-    waveform: &[u64],
+    meta_scroll: Option<usize>,
 ) {
     if area.width < 5 || area.height < 1 {
         return;
@@ -111,7 +104,7 @@ fn render_playing(
         format_duration(duration)
     );
 
-    // Line 1: icon + artist - title + time
+    // Line 1: icon + artist — track title + time
     let title_line = Line::from(vec![
         Span::styled(format!(" {} ", icon), theme::playing()),
         Span::styled(&item.artist_name, theme::normal()),
@@ -121,7 +114,7 @@ fn render_playing(
     ]);
     buf.set_line(area.x, area.y, &title_line, area.width);
 
-    // Line 2: thin progress line (single row, heatmap color)
+    // Line 2: thin progress line
     if area.height > 1 {
         let ratio = if duration > 0.0 {
             (elapsed / duration).clamp(0.0, 1.0)
@@ -140,73 +133,101 @@ fn render_playing(
         }
     }
 
-    // Remaining lines: scrolling 5-second waveform heatmap
-    if area.height > 2 && !waveform.is_empty() {
-        let wave_area = Rect {
-            x: area.x + 1,
-            y: area.y + 2,
-            width: area.width.saturating_sub(2),
-            height: area.height.saturating_sub(2),
+    // Line 3+: album metadata (about, credits, release date) — auto-scrolling
+    if area.height > 3 {
+        let max_width = area.width.saturating_sub(4) as usize;
+        let visible_rows = (area.height - 3) as usize;
+
+        // Build all text lines
+        let mut all_lines: Vec<String> = Vec::new();
+
+        // Album title
+        all_lines.push(item.album_title.clone());
+
+        // Release date
+        if let Some(ref date) = item.release_date {
+            all_lines.push(format!("released {}", format_release_date(date)));
+        }
+
+        all_lines.push(String::new()); // separator
+
+        // About
+        if let Some(ref about) = item.about {
+            for line in word_wrap(about, max_width) {
+                all_lines.push(line);
+            }
+        }
+
+        // Credits
+        if let Some(ref credits) = item.credits {
+            all_lines.push(String::new());
+            for line in word_wrap(credits, max_width) {
+                all_lines.push(line);
+            }
+        }
+
+        // Scroll offset: manual if set, otherwise auto-scroll 1 line per 2s
+        let max_scroll = all_lines.len().saturating_sub(visible_rows);
+        let scroll_offset = match meta_scroll {
+            Some(manual) => manual.min(max_scroll),
+            None => {
+                if all_lines.len() > visible_rows {
+                    ((elapsed / 2.0) as usize).min(max_scroll)
+                } else {
+                    0
+                }
+            }
         };
 
-        if wave_area.width > 0 && wave_area.height > 0 {
-            render_waveform_window(wave_area, buf, waveform, elapsed, duration);
+        // Render visible window
+        let visible = &all_lines[scroll_offset..];
+        for (i, line) in visible.iter().enumerate() {
+            if i >= visible_rows {
+                break;
+            }
+            let y = area.y + 3 + i as u16;
+            buf.set_string(area.x + 2, y, line, theme::normal());
         }
     }
 }
 
-/// Render a scrolling 5-second waveform window centered on the playhead.
-/// Waveform data is at 100 points per second (10ms per point).
-fn render_waveform_window(
-    area: Rect,
-    buf: &mut Buffer,
-    waveform: &[u64],
-    elapsed: f64,
-    _duration: f64,
-) {
-    const POINTS_PER_SEC: f64 = 100.0;
-    const WINDOW_SECS: f64 = 5.0;
-
-    let display_width = area.width as usize;
-    let total_points = waveform.len();
-    if total_points == 0 || display_width == 0 {
-        return;
+fn format_release_date(date: &str) -> String {
+    // Bandcamp dates are like "16 Jan 2026 00:00:00 GMT" — extract the readable part
+    let parts: Vec<&str> = date.split_whitespace().collect();
+    if parts.len() >= 3 {
+        format!("{} {} {}", parts[0], parts[1], parts[2])
+    } else {
+        date.to_string()
     }
-
-    let current_point = (elapsed * POINTS_PER_SEC) as usize;
-
-    // Window: 1s behind, 4s ahead
-    let window_points = (WINDOW_SECS * POINTS_PER_SEC) as usize;
-    let behind_points = (1.0 * POINTS_PER_SEC) as usize;
-    let window_start = current_point.saturating_sub(behind_points);
-    let window_end = (window_start + window_points).min(total_points);
-
-    let window = &waveform[window_start..window_end];
-    if window.is_empty() {
-        return;
-    }
-
-    let resampled = resample(window, display_width);
-
-    Waveform {
-        data: &resampled,
-    }
-    .render(area, buf);
 }
 
-fn resample(src: &[u64], target_len: usize) -> Vec<u64> {
-    if target_len == 0 || src.is_empty() {
-        return vec![0; target_len];
+fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
+    if max_width == 0 {
+        return Vec::new();
     }
 
-    let src_len = src.len();
-    (0..target_len)
-        .map(|i| {
-            let start = i * src_len / target_len;
-            let end = ((i + 1) * src_len / target_len).max(start + 1).min(src_len);
-            let sum: u64 = src[start..end].iter().sum();
-            let count = (end - start) as u64;
-            if count > 0 { sum / count } else { 0 }
-        })
-        .collect()
+    let mut lines = Vec::new();
+    for paragraph in text.lines() {
+        if paragraph.trim().is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        let mut current_line = String::new();
+        for word in paragraph.split_whitespace() {
+            if current_line.is_empty() {
+                current_line = word.to_string();
+            } else if current_line.len() + 1 + word.len() <= max_width {
+                current_line.push(' ');
+                current_line.push_str(word);
+            } else {
+                lines.push(current_line);
+                current_line = word.to_string();
+            }
+        }
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+    }
+
+    lines
 }
