@@ -56,6 +56,8 @@ pub struct App {
     pub should_quit: bool,
     pub auth: Option<AuthData>,
     pub login_step: LoginStep,
+    pub waveform: Vec<u64>,
+    waveform_rx: Option<tokio::sync::oneshot::Receiver<Vec<u64>>>,
     pub art_protocol: Option<StatefulProtocol>,
     pub art_picker: Option<Picker>,
     engine: Option<AudioEngine>,
@@ -90,6 +92,8 @@ impl App {
             should_quit: false,
             auth: None,
             login_step: LoginStep::Prompt,
+            waveform: Vec::new(),
+            waveform_rx: None,
             art_protocol: None,
             art_picker: Picker::from_query_stdio().ok(),
             engine: None,
@@ -199,6 +203,14 @@ impl App {
             self.play_next().await?;
         }
 
+        // Check for waveform result from background thread
+        if let Some(ref mut rx) = self.waveform_rx {
+            if let Ok(wf) = rx.try_recv() {
+                self.waveform = wf;
+                self.waveform_rx = None;
+            }
+        }
+
         Ok(())
     }
 
@@ -288,16 +300,6 @@ impl App {
             KeyCode::Char(' ') => self.toggle_pause()?,
             KeyCode::Char('n') => self.play_next().await?,
             KeyCode::Char('p') => self.play_prev().await?,
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                if let Some(ref mut engine) = self.engine {
-                    engine.volume_up()?;
-                }
-            }
-            KeyCode::Char('-') => {
-                if let Some(ref mut engine) = self.engine {
-                    engine.volume_down()?;
-                }
-            }
             KeyCode::Char('s') => {
                 self.queue.shuffle = !self.queue.shuffle;
                 self.status_msg = format!(
@@ -544,14 +546,26 @@ impl App {
         match client.get(&stream_url).send().await {
             Ok(resp) => {
                 let bytes = resp.bytes().await?;
+                let data = bytes.to_vec();
+
+                // Start playback immediately
                 if let Some(ref engine) = self.engine {
-                    engine.play(bytes.to_vec())?;
+                    engine.play(data.clone())?;
                     self.is_paused = false;
                     self.play_started = Some(Instant::now());
                     self.pause_accumulated = 0.0;
                     self.elapsed = 0.0;
                     self.status_msg = String::new();
                 }
+
+                // Extract waveform in background thread
+                self.waveform.clear();
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                self.waveform_rx = Some(rx);
+                tokio::task::spawn_blocking(move || {
+                    let wf = crate::player::waveform::extract_waveform(&data);
+                    let _ = tx.send(wf);
+                });
             }
             Err(e) => {
                 self.status_msg = format!("Stream error: {}", e);
@@ -589,10 +603,6 @@ impl App {
             }
         }
         Ok(())
-    }
-
-    pub fn volume(&self) -> f32 {
-        self.engine.as_ref().map(|e| e.volume()).unwrap_or(0.8)
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
@@ -657,10 +667,11 @@ impl App {
     fn draw_main(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
+        let np_height = NowPlayingBar::ideal_height(area.width);
         let chunks = Layout::vertical([
-            Constraint::Percentage(30), // Now playing + album art
-            Constraint::Min(10),  // Main view
-            Constraint::Length(1), // Status bar
+            Constraint::Length(np_height), // Now playing — sized to fit album art
+            Constraint::Min(10),           // Main view
+            Constraint::Length(1),         // Status bar
         ])
         .split(area);
 
@@ -670,8 +681,8 @@ impl App {
             current: self.queue.current_item(),
             is_paused: self.is_paused,
             elapsed: self.elapsed,
-            volume: self.volume(),
             has_art,
+            waveform: &self.waveform,
         };
         let np_area = chunks[0];
         frame.render_widget(now_playing, np_area);

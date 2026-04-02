@@ -31,10 +31,3 @@ pub fn status_bar() -> Style {
     Style::default().fg(FG).bg(BG_ALT)
 }
 
-pub fn progress_filled() -> Style {
-    Style::default().fg(HIGHLIGHT)
-}
-
-pub fn progress_empty() -> Style {
-    Style::default().fg(FG_DIM)
-}

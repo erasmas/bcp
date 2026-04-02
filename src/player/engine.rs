@@ -5,10 +5,9 @@ use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
 pub enum PlayerCommand {
-    Play(Vec<u8>), // MP3 bytes to play
+    Play(Vec<u8>),
     Pause,
     Resume,
-    SetVolume(f32), // 0.0 - 1.0
 }
 
 #[derive(Debug, Clone)]
@@ -23,7 +22,6 @@ pub enum PlayerEvent {
 pub struct AudioEngine {
     cmd_tx: mpsc::UnboundedSender<PlayerCommand>,
     pub event_rx: mpsc::UnboundedReceiver<PlayerEvent>,
-    volume: f32,
 }
 
 impl AudioEngine {
@@ -35,11 +33,7 @@ impl AudioEngine {
             audio_thread(cmd_rx, event_tx);
         });
 
-        Ok(Self {
-            cmd_tx,
-            event_rx,
-            volume: 0.8,
-        })
+        Ok(Self { cmd_tx, event_rx })
     }
 
     pub fn play(&self, mp3_data: Vec<u8>) -> Result<()> {
@@ -56,24 +50,6 @@ impl AudioEngine {
         self.cmd_tx.send(PlayerCommand::Resume)?;
         Ok(())
     }
-
-    pub fn set_volume(&mut self, vol: f32) -> Result<()> {
-        self.volume = vol.clamp(0.0, 1.0);
-        self.cmd_tx.send(PlayerCommand::SetVolume(self.volume))?;
-        Ok(())
-    }
-
-    pub fn volume(&self) -> f32 {
-        self.volume
-    }
-
-    pub fn volume_up(&mut self) -> Result<()> {
-        self.set_volume(self.volume + 0.05)
-    }
-
-    pub fn volume_down(&mut self) -> Result<()> {
-        self.set_volume(self.volume - 0.05)
-    }
 }
 
 fn audio_thread(
@@ -87,9 +63,7 @@ fn audio_thread(
 
     let mut current_sink: Option<Sink> = None;
 
-    // We need a runtime for the blocking recv
     loop {
-        // Check if current track finished
         if let Some(ref sink) = current_sink {
             if sink.empty() {
                 current_sink = None;
@@ -97,11 +71,9 @@ fn audio_thread(
             }
         }
 
-        // Non-blocking check for commands
         match cmd_rx.try_recv() {
             Ok(cmd) => match cmd {
                 PlayerCommand::Play(data) => {
-                    // Stop current playback
                     if let Some(ref sink) = current_sink {
                         sink.stop();
                     }
@@ -127,18 +99,11 @@ fn audio_thread(
                         let _ = event_tx.send(PlayerEvent::Resumed);
                     }
                 }
-                PlayerCommand::SetVolume(vol) => {
-                    if let Some(ref sink) = current_sink {
-                        sink.set_volume(vol);
-                    }
-                }
             },
             Err(mpsc::error::TryRecvError::Empty) => {
-                // No commands, sleep briefly to avoid busy-waiting
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             Err(mpsc::error::TryRecvError::Disconnected) => {
-                // Channel closed, exit thread
                 break;
             }
         }
