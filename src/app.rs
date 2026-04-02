@@ -5,6 +5,9 @@ use ratatui::{
     widgets::ListState,
     Frame,
 };
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
+use ratatui_image::StatefulImage;
 use std::time::Instant;
 
 use crate::auth;
@@ -53,6 +56,8 @@ pub struct App {
     pub should_quit: bool,
     pub auth: Option<AuthData>,
     pub login_step: LoginStep,
+    pub art_protocol: Option<StatefulProtocol>,
+    pub art_picker: Option<Picker>,
     engine: Option<AudioEngine>,
     client: Option<BandcampClient>,
 }
@@ -85,6 +90,8 @@ impl App {
             should_quit: false,
             auth: None,
             login_step: LoginStep::Prompt,
+            art_protocol: None,
+            art_picker: Picker::from_query_stdio().ok(),
             engine: None,
             client: None,
         }
@@ -278,9 +285,9 @@ impl App {
             KeyCode::Char('g') => self.move_to_top(),
             KeyCode::Char('G') => self.move_to_bottom(),
             KeyCode::Enter => self.handle_enter().await?,
-            KeyCode::Char(' ') | KeyCode::Char('p') => self.toggle_pause()?,
+            KeyCode::Char(' ') => self.toggle_pause()?,
             KeyCode::Char('n') => self.play_next().await?,
-            KeyCode::Char('N') => self.play_prev().await?,
+            KeyCode::Char('p') => self.play_prev().await?,
             KeyCode::Char('+') | KeyCode::Char('=') => {
                 if let Some(ref mut engine) = self.engine {
                     engine.volume_up()?;
@@ -482,6 +489,7 @@ impl App {
                         track: t.clone(),
                         album_title: album.album_title.clone(),
                         artist_name: album.artist_name.clone(),
+                        art_url: album.art_url.clone(),
                     })
                     .collect();
 
@@ -510,11 +518,30 @@ impl App {
             return Ok(());
         };
 
+        let stream_url = url.clone();
+        let art_url = item.art_url.clone();
         self.status_msg = format!("Buffering: {} - {}...", item.artist_name, item.track.title);
 
-        // Download the MP3 data
         let client = reqwest::Client::new();
-        match client.get(url).send().await {
+
+        // Fetch album art
+        if let Some(ref art) = art_url {
+            // Use _2 suffix for large size (~1024px)
+            let art_sized = art.replace("_16.", "_2.");
+            if let Ok(resp) = client.get(&art_sized).send().await {
+                if let Ok(bytes) = resp.bytes().await {
+                    if let Ok(img) = image::load_from_memory(&bytes) {
+                        if let Some(ref mut picker) = self.art_picker {
+                            self.art_protocol =
+                                Some(picker.new_resize_protocol(img));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Download and play the MP3 data
+        match client.get(&stream_url).send().await {
             Ok(resp) => {
                 let bytes = resp.bytes().await?;
                 if let Some(ref engine) = self.engine {
@@ -631,20 +658,30 @@ impl App {
         let area = frame.area();
 
         let chunks = Layout::vertical([
-            Constraint::Length(6), // Now playing
+            Constraint::Percentage(30), // Now playing + album art
             Constraint::Min(10),  // Main view
             Constraint::Length(1), // Status bar
         ])
         .split(area);
 
         // Now playing bar
+        let has_art = self.art_protocol.is_some();
         let now_playing = NowPlayingBar {
             current: self.queue.current_item(),
             is_paused: self.is_paused,
             elapsed: self.elapsed,
             volume: self.volume(),
+            has_art,
         };
-        frame.render_widget(now_playing, chunks[0]);
+        let np_area = chunks[0];
+        frame.render_widget(now_playing, np_area);
+
+        // Render album art inside the now-playing bar
+        if let Some(ref mut protocol) = self.art_protocol {
+            let art_rect = NowPlayingBar::art_area(np_area);
+            let art_widget = StatefulImage::default().resize(ratatui_image::Resize::Scale(None));
+            frame.render_stateful_widget(art_widget, art_rect, protocol);
+        }
 
         // Main view
         match self.view {
@@ -688,7 +725,7 @@ impl App {
             format!("{}  |  {}", self.status_msg, view_indicator)
         } else {
             format!(
-                "q:Quit  p:Pause  n/N:Next/Prev  s:Shuffle  r:Repeat  /:Search  |  {}",
+                "q:quit  space:pause  n:next  p:prev  s:shuffle  r:repeat  /:search  |  {}",
                 view_indicator
             )
         };
