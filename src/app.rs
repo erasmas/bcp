@@ -327,6 +327,11 @@ impl App {
     async fn handle_main_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Esc => match self.view {
+                View::Album => self.view = View::Collection,
+                View::Queue => self.view = View::Collection,
+                _ => {}
+            },
             KeyCode::Char('1') => self.view = View::Collection,
             KeyCode::Char('2') => {
                 if self.selected_album_idx.is_some() {
@@ -626,6 +631,9 @@ impl App {
     fn play_next(&mut self) {
         if self.queue.next().is_some() {
             self.start_playback();
+            if let Some(idx) = self.queue.current {
+                self.album_state.select(Some(idx));
+            }
         } else {
             self.status_msg = "End of queue".to_string();
             self.play_started = None;
@@ -635,6 +643,9 @@ impl App {
     fn play_prev(&mut self) {
         if self.queue.prev().is_some() {
             self.start_playback();
+            if let Some(idx) = self.queue.current {
+                self.album_state.select(Some(idx));
+            }
         }
     }
 
@@ -770,23 +781,42 @@ impl App {
             }
         }
 
-        // Status bar
-        let view_indicator = match self.view {
-            View::Collection => "[1]Collection  2 Album  3 Queue",
-            View::Album => " 1 Collection [2]Album  3 Queue",
-            View::Queue => " 1 Collection  2 Album [3]Queue",
-        };
-        let status_text = if self.filter_mode {
-            format!("/{}_  |  {}", self.filter, view_indicator)
+        // Status bar: tabs on the right, hints on the left
+        let status_area = chunks[2];
+
+        // Split status bar: left for hints, right for tabs
+        let status_chunks = Layout::horizontal([
+            Constraint::Min(10),      // hints
+            Constraint::Length(40),    // tabs
+        ])
+        .split(status_area);
+
+        // Left: context hints or status message
+        let hint_text = if self.filter_mode {
+            format!(" /{}_ ", self.filter)
         } else if !self.status_msg.is_empty() {
-            format!("{}  |  {}", self.status_msg, view_indicator)
+            format!(" {} ", self.status_msg)
         } else {
-            format!(
-                "q:quit  space:pause  n:next  p:prev  s:shuffle  r:repeat  /:search  |  {}",
-                view_indicator
-            )
+            " q:quit  \u{2423}:pause  n/p:next/prev  s:shuffle  /:search ".to_string()
         };
-        let status = ratatui::widgets::Paragraph::new(status_text).style(theme::status_bar());
-        frame.render_widget(status, chunks[2]);
+        let hints = ratatui::widgets::Paragraph::new(hint_text).style(theme::status_bar());
+        frame.render_widget(hints, status_chunks[0]);
+
+        // Right: tabs
+        let tab_index = match self.view {
+            View::Collection => 0,
+            View::Album => 1,
+            View::Queue => 2,
+        };
+        let tabs = ratatui::widgets::Tabs::new(vec![
+            " 1 Collection ",
+            " 2 Album ",
+            " 3 Queue ",
+        ])
+        .select(tab_index)
+        .style(theme::status_bar())
+        .highlight_style(theme::selected())
+        .divider("\u{2502}");
+        frame.render_widget(tabs, status_chunks[1]);
     }
 }
