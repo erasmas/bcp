@@ -4,6 +4,7 @@ mod bandcamp;
 mod cache;
 mod config;
 mod events;
+mod library;
 mod player;
 mod ui;
 

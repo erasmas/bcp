@@ -3,6 +3,7 @@ use crate::bandcamp::models::Track;
 #[derive(Debug, Clone)]
 pub struct QueueItem {
     pub track: Track,
+    pub item_id: u64,
     pub album_title: String,
     pub artist_name: String,
     pub art_url: Option<String>,

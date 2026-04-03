@@ -36,7 +36,7 @@ impl<'a> StatefulWidget for QueueView<'a> {
                 let line = Line::from(vec![
                     Span::styled(prefix, style),
                     Span::styled(&item.artist_name, style),
-                    Span::styled(" \u{2014} ", theme::dim()),
+                    Span::styled(" - ", theme::dim()),
                     Span::styled(&item.track.title, style),
                     Span::styled(
                         format!("  [{}]", &item.album_title),

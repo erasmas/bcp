@@ -1,7 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 
 // Nord-inspired color scheme
-pub const BG_ALT: Color = Color::Rgb(59, 66, 82);   // Nord1
 pub const FG: Color = Color::Rgb(216, 222, 233);     // Nord4
 pub const FG_DIM: Color = Color::Rgb(76, 86, 106);   // Nord3
 pub const ACCENT: Color = Color::Rgb(136, 192, 208); // Nord8
@@ -26,8 +25,3 @@ pub fn playing() -> Style {
 pub fn title() -> Style {
     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
 }
-
-pub fn status_bar() -> Style {
-    Style::default().fg(FG).bg(BG_ALT)
-}
-

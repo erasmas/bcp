@@ -108,7 +108,7 @@ fn render_playing(
     let title_line = Line::from(vec![
         Span::styled(format!(" {} ", icon), theme::playing()),
         Span::styled(&item.artist_name, theme::normal()),
-        Span::styled(" \u{2014} ", theme::dim()),
+        Span::styled(" - ", theme::dim()),
         Span::styled(&item.track.title, theme::normal()),
         Span::styled(format!("  {}", time_str), theme::dim()),
     ]);
