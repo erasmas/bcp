@@ -23,13 +23,11 @@ use crate::ui::views::album::AlbumView;
 use crate::ui::views::collection::CollectionView;
 use crate::ui::views::downloaded::DownloadedView;
 use crate::ui::views::now_playing::NowPlayingBar;
-use crate::ui::views::queue_view::QueueView;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum View {
     Collection,
     Album,
-    Queue,
     Downloaded,
 }
 
@@ -47,7 +45,6 @@ pub struct App {
     pub queue: PlayQueue,
     pub collection_state: ListState,
     pub album_state: ListState,
-    pub queue_state: ListState,
     pub downloaded_state: ListState,
     pub library: LibraryIndex,
     pub download_rx: Vec<tokio::sync::mpsc::UnboundedReceiver<DownloadEvent>>,
@@ -57,7 +54,8 @@ pub struct App {
     pub elapsed: f64,
     pub play_started: Option<Instant>,
     pub pause_accumulated: f64,
-    pub filter: String,
+    pub collection_filter: String,
+    pub album_filter: String,
     pub filter_mode: bool,
     pub status_msg: String,
     pub should_quit: bool,
@@ -88,7 +86,6 @@ impl App {
             queue: PlayQueue::new(),
             collection_state: ListState::default(),
             album_state: ListState::default(),
-            queue_state: ListState::default(),
             downloaded_state: ListState::default(),
             library: LibraryIndex::load().unwrap_or_else(|_| LibraryIndex::new()),
             download_rx: Vec::new(),
@@ -98,7 +95,8 @@ impl App {
             elapsed: 0.0,
             play_started: None,
             pause_accumulated: 0.0,
-            filter: String::new(),
+            collection_filter: String::new(),
+            album_filter: String::new(),
             filter_mode: false,
             status_msg: String::new(),
             should_quit: false,
@@ -196,6 +194,11 @@ impl App {
     }
 
     async fn handle_tick(&mut self) -> Result<()> {
+        // Blink cursor in filter mode
+        if self.filter_mode {
+            self.dirty = true;
+        }
+
         // Update elapsed time
         if let Some(started) = self.play_started {
             if !self.is_paused {
@@ -314,11 +317,14 @@ impl App {
             AppScreen::Loading => {} // No input during loading
             AppScreen::Main => {
                 if self.filter_mode {
+                    let was_filter_mode = true;
                     self.handle_filter_key(key)?;
+                    // Only fall through to main handler on Enter (to open selection)
+                    if was_filter_mode && key.code != KeyCode::Enter {
+                        return Ok(());
+                    }
                 }
-                if !self.filter_mode {
-                    self.handle_main_key(key).await?;
-                }
+                self.handle_main_key(key).await?;
             }
         }
 
@@ -374,18 +380,23 @@ impl App {
     async fn handle_main_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Esc => match self.view {
-                View::Album | View::Queue | View::Downloaded => self.view = View::Collection,
-                _ => {}
-            },
+            KeyCode::Esc => {
+                if !self.active_filter().is_empty() {
+                    self.active_filter_mut().clear();
+                } else {
+                    match self.view {
+                        View::Album | View::Downloaded => self.view = View::Collection,
+                        _ => {}
+                    }
+                }
+            }
             KeyCode::Char('1') => self.view = View::Collection,
             KeyCode::Char('2') => {
                 if self.selected_album_idx.is_some() {
                     self.view = View::Album;
                 }
             }
-            KeyCode::Char('3') => self.view = View::Queue,
-            KeyCode::Char('4') => {
+            KeyCode::Char('3') => {
                 self.view = View::Downloaded;
                 if self.downloaded_state.selected().is_none() && !self.albums.is_empty() {
                     self.downloaded_state.select(Some(0));
@@ -419,31 +430,17 @@ impl App {
                     self.meta_scroll = Some(0); // manual at top
                 }
             }
-            KeyCode::Char('s') => {
-                self.queue.shuffle = !self.queue.shuffle;
-                self.status_msg = format!(
-                    "Shuffle: {}",
-                    if self.queue.shuffle { "on" } else { "off" }
-                );
-            }
-            KeyCode::Char('r') => match self.view {
-                View::Collection => {
+            KeyCode::Char('r') => {
+                if self.view == View::Collection {
                     // Refresh collection
                     cache::invalidate_cache()?;
                     self.screen = AppScreen::Loading;
                     self.status_msg = "Refreshing collection...".to_string();
                 }
-                _ => {
-                    self.queue.repeat = !self.queue.repeat;
-                    self.status_msg = format!(
-                        "Repeat: {}",
-                        if self.queue.repeat { "on" } else { "off" }
-                    );
-                }
-            },
+            }
             KeyCode::Char('/') => {
                 self.filter_mode = true;
-                self.filter.clear();
+                self.active_filter_mut().clear();
             }
             _ => {}
         }
@@ -455,19 +452,23 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 self.filter_mode = false;
-                self.filter.clear();
+                self.active_filter_mut().clear();
             }
             KeyCode::Enter => {
                 self.filter_mode = false;
                 // Don't consume — let main handler process Enter
             }
             KeyCode::Backspace => {
-                self.filter.pop();
+                self.active_filter_mut().pop();
             }
             KeyCode::Char(c) => {
-                self.filter.push(c);
+                self.active_filter_mut().push(c);
                 // Reset selection when filter changes
-                self.collection_state.select(Some(0));
+                match self.view {
+                    View::Collection => self.collection_state.select(Some(0)),
+                    View::Album => self.album_state.select(Some(0)),
+                    _ => {}
+                }
             }
             _ => {}
         }
@@ -477,10 +478,10 @@ impl App {
     fn move_selection(&mut self, delta: i32) {
         let (state, len) = match self.view {
             View::Collection => {
-                let filtered_len = if self.filter.is_empty() {
+                let filtered_len = if self.collection_filter.is_empty() {
                     self.albums.len()
                 } else {
-                    let q = self.filter.to_lowercase();
+                    let q = self.collection_filter.to_lowercase();
                     self.albums
                         .iter()
                         .filter(|a| {
@@ -495,11 +496,17 @@ impl App {
                 let len = self
                     .selected_album_idx
                     .and_then(|i| self.albums.get(i))
-                    .map(|a| a.tracks.len())
+                    .map(|a| {
+                        if self.album_filter.is_empty() {
+                            a.tracks.len()
+                        } else {
+                            let q = self.album_filter.to_lowercase();
+                            a.tracks.iter().filter(|t| t.title.to_lowercase().contains(&q)).count()
+                        }
+                    })
                     .unwrap_or(0);
                 (&mut self.album_state, len)
             }
-            View::Queue => (&mut self.queue_state, self.queue.items.len()),
             View::Downloaded => (&mut self.downloaded_state, self.albums.len()),
         };
 
@@ -520,7 +527,6 @@ impl App {
         match self.view {
             View::Collection => self.collection_state.select(Some(0)),
             View::Album => self.album_state.select(Some(0)),
-            View::Queue => self.queue_state.select(Some(0)),
             View::Downloaded => self.downloaded_state.select(Some(0)),
         }
     }
@@ -533,14 +539,12 @@ impl App {
                 .and_then(|i| self.albums.get(i))
                 .map(|a| a.tracks.len())
                 .unwrap_or(0),
-            View::Queue => self.queue.items.len(),
             View::Downloaded => self.albums.len(),
         };
         if len > 0 {
             match self.view {
                 View::Collection => self.collection_state.select(Some(len - 1)),
                 View::Album => self.album_state.select(Some(len - 1)),
-                View::Queue => self.queue_state.select(Some(len - 1)),
                 View::Downloaded => self.downloaded_state.select(Some(len - 1)),
             }
         }
@@ -554,10 +558,10 @@ impl App {
                 };
 
                 // Map filtered index to actual album index
-                let actual_idx = if self.filter.is_empty() {
+                let actual_idx = if self.collection_filter.is_empty() {
                     selected
                 } else {
-                    let q = self.filter.to_lowercase();
+                    let q = self.collection_filter.to_lowercase();
                     let filtered: Vec<usize> = self
                         .albums
                         .iter()
@@ -603,11 +607,29 @@ impl App {
                 let Some(album_idx) = self.selected_album_idx else {
                     return Ok(());
                 };
-                let Some(track_idx) = self.album_state.selected() else {
+                let Some(selected) = self.album_state.selected() else {
                     return Ok(());
                 };
 
                 let album = &self.albums[album_idx];
+
+                // Map filtered selection to actual track index
+                let track_idx = if self.album_filter.is_empty() {
+                    selected
+                } else {
+                    let q = self.album_filter.to_lowercase();
+                    let filtered: Vec<usize> = album
+                        .tracks
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, t)| t.title.to_lowercase().contains(&q))
+                        .map(|(i, _)| i)
+                        .collect();
+                    match filtered.get(selected) {
+                        Some(&idx) => idx,
+                        None => return Ok(()),
+                    }
+                };
 
                 // Build queue from album tracks starting at selected
                 let items: Vec<QueueItem> = album
@@ -627,12 +649,6 @@ impl App {
 
                 self.queue.replace_all(items, track_idx);
                 self.start_playback();
-            }
-            View::Queue => {
-                if let Some(selected) = self.queue_state.selected() {
-                    self.queue.current = Some(selected);
-                    self.start_playback();
-                }
             }
             View::Downloaded => {
                 // Same as collection — open the album
@@ -849,6 +865,22 @@ impl App {
         self.dirty = true;
     }
 
+    fn active_filter(&self) -> &str {
+        match self.view {
+            View::Collection => &self.collection_filter,
+            View::Album => &self.album_filter,
+            _ => "",
+        }
+    }
+
+    fn active_filter_mut(&mut self) -> &mut String {
+        match self.view {
+            View::Collection => &mut self.collection_filter,
+            View::Album => &mut self.album_filter,
+            _ => &mut self.collection_filter, // fallback, won't be used
+        }
+    }
+
     fn toggle_pause(&mut self) -> Result<()> {
         if let Some(ref engine) = self.engine {
             if self.is_paused {
@@ -956,7 +988,7 @@ impl App {
             View::Collection => {
                 let view = CollectionView {
                     albums: &self.albums,
-                    filter: &self.filter,
+                    filter: &self.collection_filter,
                 };
                 frame.render_stateful_widget(view, chunks[1], &mut self.collection_state);
             }
@@ -968,14 +1000,11 @@ impl App {
                             album,
                             playing_album_id: current.map(|q| q.item_id),
                             playing_track_num: current.map(|q| q.track.track_num),
+                            filter: &self.album_filter,
                         };
                         frame.render_stateful_widget(view, chunks[1], &mut self.album_state);
                     }
                 }
-            }
-            View::Queue => {
-                let view = QueueView { queue: &self.queue };
-                frame.render_stateful_widget(view, chunks[1], &mut self.queue_state);
             }
             View::Downloaded => {
                 let view = DownloadedView {
@@ -986,11 +1015,27 @@ impl App {
             }
         }
 
-        // Status bar: tabs on the left, status on the right
+        // Status bar
         let status_area = chunks[2];
 
+        // When in filter mode, show a prominent search bar across the full width
+        if self.filter_mode {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let cursor = if (now / 500) % 2 == 0 { "\u{2502}" } else { " " };
+            let search_text = format!(" search: {}{}", self.active_filter(), cursor);
+            let search_bar = ratatui::widgets::Paragraph::new(search_text)
+                .style(ratatui::style::Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(ratatui::style::Modifier::BOLD));
+            frame.render_widget(search_bar, status_area);
+            return;
+        }
+
         let status_chunks = Layout::horizontal([
-            Constraint::Length(62),   // tabs
+            Constraint::Length(50),   // tabs
             Constraint::Min(10),      // status/hints
         ])
         .split(status_area);
@@ -999,14 +1044,12 @@ impl App {
         let tab_index = match self.view {
             View::Collection => 0,
             View::Album => 1,
-            View::Queue => 2,
-            View::Downloaded => 3,
+            View::Downloaded => 2,
         };
         let tabs = ratatui::widgets::Tabs::new(vec![
             "[1] Collection",
             "[2] Album",
-            "[3] Queue",
-            "[4] Downloaded",
+            "[3] Downloaded",
         ])
         .select(tab_index)
         .style(theme::dim())
@@ -1015,12 +1058,10 @@ impl App {
         frame.render_widget(tabs, status_chunks[0]);
 
         // Right: status message or hints
-        let hint_text = if self.filter_mode {
-            format!(" /{}_ ", self.filter)
-        } else if !self.status_msg.is_empty() {
+        let hint_text = if !self.status_msg.is_empty() {
             format!(" {} ", self.status_msg)
         } else {
-            " quit(q)  pause(\u{2423})  next(n)  prev(p)  shuffle(s)  search(/) ".to_string()
+            " quit(q)  pause(\u{2423})  next(n)  prev(p)  search(/) ".to_string()
         };
         let hints = ratatui::widgets::Paragraph::new(hint_text)
             .style(theme::dim())

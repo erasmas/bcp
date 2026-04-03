@@ -49,11 +49,7 @@ impl<'a> StatefulWidget for CollectionView<'a> {
             })
             .collect();
 
-        let title = if self.filter.is_empty() {
-            format!(" Collection ({}) ", filtered.len())
-        } else {
-            format!(" Collection ({}) [/{}] ", filtered.len(), self.filter)
-        };
+        let title = format!(" Collection ({}) ", filtered.len());
 
         let list = List::new(items)
             .block(

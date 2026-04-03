@@ -16,8 +16,6 @@ pub struct QueueItem {
 pub struct PlayQueue {
     pub items: Vec<QueueItem>,
     pub current: Option<usize>,
-    pub shuffle: bool,
-    pub repeat: bool,
 }
 
 impl PlayQueue {
@@ -25,8 +23,6 @@ impl PlayQueue {
         Self {
             items: Vec::new(),
             current: None,
-            shuffle: false,
-            repeat: false,
         }
     }
 
@@ -49,18 +45,9 @@ impl PlayQueue {
             return None;
         }
 
-        if self.shuffle {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let seed = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .subsec_nanos() as usize;
-            self.current = Some(seed % len);
-        } else if let Some(cur) = self.current {
+        if let Some(cur) = self.current {
             if cur + 1 < len {
                 self.current = Some(cur + 1);
-            } else if self.repeat {
-                self.current = Some(0);
             } else {
                 return None;
             }
@@ -76,11 +63,8 @@ impl PlayQueue {
         if let Some(cur) = self.current {
             if cur > 0 {
                 self.current = Some(cur - 1);
-            } else if self.repeat {
-                self.current = Some(self.items.len() - 1);
             }
         }
         self.current_item()
     }
-
 }
