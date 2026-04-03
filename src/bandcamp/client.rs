@@ -203,22 +203,14 @@ fn parse_album_page(html: &str) -> Result<AlbumDetail> {
 }
 
 fn extract_data_tralbum(html: &str) -> Option<String> {
-    // Pattern: data-tralbum="..." (HTML-encoded JSON)
-    let marker = "data-tralbum=\"";
-    let start = html.find(marker)? + marker.len();
-    let rest = &html[start..];
-    let end = rest.find('"')?;
-    let encoded = &rest[..end];
+    use scraper::{Html, Selector};
 
-    // Decode HTML entities
-    let decoded = encoded
-        .replace("&quot;", "\"")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&#39;", "'");
+    let document = Html::parse_document(html);
+    let selector = Selector::parse("[data-tralbum]").ok()?;
+    let element = document.select(&selector).next()?;
+    let json = element.attr("data-tralbum")?;
 
-    Some(decoded)
+    Some(json.to_string())
 }
 
 fn chrono_like_timestamp() -> String {
