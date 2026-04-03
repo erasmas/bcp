@@ -214,6 +214,7 @@ fn extract_data_tralbum(html: &str) -> Option<String> {
 }
 
 /// Parse album page HTML, exposed for testing.
+#[cfg(test)]
 pub(crate) fn parse_album_page_public(html: &str) -> Result<AlbumDetail> {
     parse_album_page(html)
 }

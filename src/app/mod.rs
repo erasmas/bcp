@@ -9,7 +9,7 @@ use ratatui_image::protocol::StatefulProtocol;
 use std::time::Instant;
 
 use crate::bandcamp::client::BandcampClient;
-use crate::bandcamp::models::{Album, AuthData};
+use crate::bandcamp::models::{Album, AuthData, Track};
 use crate::events::AppEvent;
 use crate::library::{self, DownloadEvent, LibraryIndex};
 use crate::player::engine::{AudioEngine, PlayerEvent};
@@ -388,5 +388,36 @@ impl App {
         self.recompute_collection_filter();
         self.recompute_album_filter();
         self.recompute_downloaded_filter();
+    }
+
+    /// Populate albums list from the library index for offline mode.
+    pub(crate) fn load_albums_from_library(&mut self) {
+        for dl_album in self.library.albums.values() {
+            if self.albums.iter().any(|a| a.item_id == dl_album.item_id) {
+                continue;
+            }
+            let tracks = dl_album
+                .tracks
+                .iter()
+                .map(|t| Track {
+                    title: t.title.clone(),
+                    track_num: t.track_num,
+                    duration: 0.0,
+                    stream_url: None,
+                })
+                .collect();
+            self.albums.push(Album {
+                item_id: dl_album.item_id,
+                album_title: dl_album.album_title.clone(),
+                artist_name: dl_album.artist_name.clone(),
+                item_url: String::new(),
+                art_url: None,
+                date_added: None,
+                tracks,
+                about: None,
+                credits: None,
+                release_date: None,
+            });
+        }
     }
 }

@@ -128,9 +128,21 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
 
     if needs_load {
         if let Err(e) = app.load_collection().await {
-            app.status_msg = format!("Error: {}", e);
-            app.screen = app::AppScreen::Login;
-            app.login_step = app::LoginStep::Prompt;
+            // Fall back to offline mode if we have downloaded albums
+            if !app.library.albums.is_empty() {
+                app.load_albums_from_library();
+                app.recompute_all_filters();
+                app.screen = app::AppScreen::Main;
+                if !app.albums.is_empty() {
+                    app.collection_state.select(Some(0));
+                }
+                app.view = app::View::Downloaded;
+                app.status_msg = format!("Offline mode ({} downloaded albums)", app.library.albums.len());
+            } else {
+                app.status_msg = format!("Error: {}", e);
+                app.screen = app::AppScreen::Login;
+                app.login_step = app::LoginStep::Prompt;
+            }
         }
         terminal.draw(|f| app.draw(f))?;
     }
@@ -147,10 +159,21 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
             if app.screen == app::AppScreen::Loading && app.albums.is_empty() {
                 terminal.draw(|f| app.draw(f))?;
                 if let Err(e) = app.load_collection().await {
-                    app.status_msg = format!("Error: {}", e);
-                    if app.auth.is_none() {
-                        app.screen = app::AppScreen::Login;
-                        app.login_step = app::LoginStep::Prompt;
+                    if !app.library.albums.is_empty() {
+                        app.load_albums_from_library();
+                        app.recompute_all_filters();
+                        app.screen = app::AppScreen::Main;
+                        if !app.albums.is_empty() {
+                            app.collection_state.select(Some(0));
+                        }
+                        app.view = app::View::Downloaded;
+                        app.status_msg = format!("Offline mode ({} downloaded albums)", app.library.albums.len());
+                    } else {
+                        app.status_msg = format!("Error: {}", e);
+                        if app.auth.is_none() {
+                            app.screen = app::AppScreen::Login;
+                            app.login_step = app::LoginStep::Prompt;
+                        }
                     }
                 }
                 app.dirty = true;

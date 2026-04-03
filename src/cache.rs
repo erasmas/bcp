@@ -65,6 +65,7 @@ pub fn invalidate_cache() -> Result<()> {
 }
 
 /// Check whether a cache timestamp is still valid given current time.
+#[cfg(test)]
 pub(crate) fn is_cache_fresh(cached_timestamp: u64, now: u64) -> bool {
     now.saturating_sub(cached_timestamp) <= DEFAULT_TTL_SECS
 }
