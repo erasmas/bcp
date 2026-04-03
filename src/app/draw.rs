@@ -8,6 +8,7 @@ use super::{App, AppScreen, LoginStep, View};
 use crate::ui::theme;
 use crate::ui::views::album::AlbumView;
 use crate::ui::views::collection::CollectionView;
+use crate::ui::views::settings::SettingsView;
 use crate::ui::views::downloaded::DownloadedView;
 use crate::ui::views::now_playing::NowPlayingBar;
 
@@ -131,6 +132,20 @@ impl App {
                 };
                 frame.render_stateful_widget(view, chunks[1], &mut self.downloaded_state);
             }
+            View::Settings => {
+                let username = self.auth.as_ref()
+                    .and_then(|a| a.username.as_deref())
+                    .unwrap_or("not logged in");
+                let downloaded_count = self.library.albums.values()
+                    .filter(|a| a.status == crate::library::AlbumDownloadStatus::Complete)
+                    .count();
+                let view = SettingsView {
+                    username,
+                    album_count: self.albums.len(),
+                    downloaded_count,
+                };
+                frame.render_widget(view, chunks[1]);
+            }
         }
 
         // Status bar
@@ -152,7 +167,7 @@ impl App {
         }
 
         let status_chunks = Layout::horizontal([
-            Constraint::Length(50),
+            Constraint::Length(62),
             Constraint::Min(10),
         ])
         .split(status_area);
@@ -161,11 +176,13 @@ impl App {
             View::Collection => 0,
             View::Album => 1,
             View::Downloaded => 2,
+            View::Settings => 3,
         };
         let tabs = ratatui::widgets::Tabs::new(vec![
             "[1] Collection",
             "[2] Album",
             "[3] Downloaded",
+            "[4] Info",
         ])
         .select(tab_index)
         .style(theme::dim())

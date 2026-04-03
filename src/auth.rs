@@ -31,31 +31,12 @@ pub fn extract_bandcamp_cookie() -> Result<Option<String>> {
         "bandcamp.com".to_string(),
     ];
 
-    // Try Firefox-based browsers first (avoids Keychain prompts from Chrome/Vivaldi)
-    let attempts: Vec<(&str, Result<Vec<rookie::enums::Cookie>, _>)> = vec![
-        ("Firefox", rookie::firefox(Some(domains.clone()))),
-    ];
-
-    let mut errors = Vec::new();
-
-    for (browser, result) in attempts {
-        match result {
-            Ok(cookies) => {
-                if let Some(cookie) = find_identity_cookie(&cookies) {
-                    eprintln!("Found identity cookie in {}", browser);
-                    return Ok(Some(cookie));
-                }
-                eprintln!("{}: no identity cookie found ({} cookies total)", browser, cookies.len());
-            }
-            Err(e) => {
-                errors.push(format!("{}: {}", browser, e));
-            }
-        }
-    }
-
-    // Try Firefox-based browsers with custom profile paths (Zen, LibreWolf, etc.)
+    // Try Firefox-based browsers via custom profile paths
+    // (skip rookie::firefox/chrome/safari to avoid macOS Keychain prompts)
     let home = dirs::home_dir().unwrap_or_default();
     let firefox_based_paths = [
+        home.join("Library/Application Support/Firefox"),        // Firefox macOS
+        home.join(".mozilla/firefox"),                           // Firefox Linux
         home.join("Library/Application Support/zen"),            // Zen macOS
         home.join(".zen"),                                       // Zen Linux
         home.join("Library/Application Support/librewolf"),      // LibreWolf macOS
@@ -73,10 +54,6 @@ pub fn extract_bandcamp_cookie() -> Result<Option<String>> {
             eprintln!("Found identity cookie in {:?}", base_path);
             return Ok(Some(cookie));
         }
-    }
-
-    if !errors.is_empty() {
-        eprintln!("Browser errors: {}", errors.join("; "));
     }
 
     Ok(None)

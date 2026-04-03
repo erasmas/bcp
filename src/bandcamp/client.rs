@@ -56,7 +56,7 @@ impl BandcampClient {
             .context("No fan_id in collection summary response")?;
 
         let username = data
-            .get("username")
+            .pointer("/collection_summary/username")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_string();

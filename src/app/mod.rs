@@ -21,6 +21,7 @@ pub enum View {
     Collection,
     Album,
     Downloaded,
+    Settings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -92,7 +92,7 @@ impl App {
                     self.active_filter_mut().clear();
                 } else {
                     match self.view {
-                        View::Album | View::Downloaded => self.view = View::Collection,
+                        View::Album | View::Downloaded | View::Settings => self.view = View::Collection,
                         _ => {}
                     }
                 }
@@ -109,6 +109,7 @@ impl App {
                     self.downloaded_state.select(Some(0));
                 }
             }
+            KeyCode::Char('4') => self.view = View::Settings,
             KeyCode::Char('d') => self.download_selected_album().await,
             KeyCode::Char('D') => self.download_all_albums().await,
             KeyCode::Char('j') | KeyCode::Down => self.move_selection(1),
@@ -209,6 +210,7 @@ impl App {
                 (&mut self.album_state, len)
             }
             View::Downloaded => (&mut self.downloaded_state, self.albums.len()),
+            View::Settings => return,
         };
 
         if len == 0 {
@@ -229,6 +231,7 @@ impl App {
             View::Collection => self.collection_state.select(Some(0)),
             View::Album => self.album_state.select(Some(0)),
             View::Downloaded => self.downloaded_state.select(Some(0)),
+            View::Settings => {}
         }
     }
 
@@ -241,12 +244,14 @@ impl App {
                 .map(|a| a.tracks.len())
                 .unwrap_or(0),
             View::Downloaded => self.albums.len(),
+            View::Settings => return,
         };
         if len > 0 {
             match self.view {
                 View::Collection => self.collection_state.select(Some(len - 1)),
                 View::Album => self.album_state.select(Some(len - 1)),
                 View::Downloaded => self.downloaded_state.select(Some(len - 1)),
+                View::Settings => {}
             }
         }
     }
@@ -343,6 +348,7 @@ impl App {
                 self.view = View::Album;
                 self.status_msg = String::new();
             }
+            View::Settings => {}
         }
         Ok(())
     }
