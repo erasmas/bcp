@@ -20,9 +20,16 @@ impl App {
             AppScreen::Loading => {}
             AppScreen::Main => {
                 if self.filter_mode {
-                    self.handle_filter_key(key)?;
-                    if key.code != KeyCode::Enter {
+                    let is_nav = matches!(
+                        key.code,
+                        KeyCode::Up | KeyCode::Down | KeyCode::Enter
+                    );
+                    if !is_nav {
+                        self.handle_filter_key(key)?;
                         return Ok(());
+                    }
+                    if key.code == KeyCode::Enter {
+                        self.handle_filter_key(key)?;
                     }
                 }
                 self.handle_main_key(key).await?;
