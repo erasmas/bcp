@@ -269,7 +269,8 @@ impl App {
             AppScreen::Main => {
                 if self.filter_mode {
                     self.handle_filter_key(key)?;
-                } else {
+                }
+                if !self.filter_mode {
                     self.handle_main_key(key).await?;
                 }
             }
@@ -405,7 +406,7 @@ impl App {
             }
             KeyCode::Enter => {
                 self.filter_mode = false;
-                // Keep filter active
+                // Don't consume — let main handler process Enter
             }
             KeyCode::Backspace => {
                 self.filter.pop();
@@ -797,7 +798,7 @@ impl App {
         } else if !self.status_msg.is_empty() {
             format!(" {} ", self.status_msg)
         } else {
-            " q:quit  \u{2423}:pause  n/p:next/prev  s:shuffle  /:search ".to_string()
+            " quit(q)  pause(\u{2423})  next(n)  prev(p)  shuffle(s)  search(/) ".to_string()
         };
         let hints = ratatui::widgets::Paragraph::new(hint_text).style(theme::status_bar());
         frame.render_widget(hints, status_chunks[0]);
