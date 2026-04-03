@@ -3,7 +3,7 @@ use reqwest::header::{COOKIE, USER_AGENT};
 
 use super::models::*;
 
-const BC_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const BC_USER_AGENT: &str = "Mozilla/5.0 (compatible; bcp/0.1; +https://github.com)";
 
 pub struct BandcampClient {
     http: reqwest::Client,
