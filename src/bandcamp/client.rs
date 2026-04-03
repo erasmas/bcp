@@ -213,6 +213,11 @@ fn extract_data_tralbum(html: &str) -> Option<String> {
     Some(json.to_string())
 }
 
+/// Parse album page HTML, exposed for testing.
+pub(crate) fn parse_album_page_public(html: &str) -> Result<AlbumDetail> {
+    parse_album_page(html)
+}
+
 fn chrono_like_timestamp() -> String {
     // Generate a Unix timestamp for "now" used as the initial token
     let now = std::time::SystemTime::now()

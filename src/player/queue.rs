@@ -68,3 +68,102 @@ impl PlayQueue {
         self.current_item()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bandcamp::models::Track;
+
+    fn make_item(num: u32) -> QueueItem {
+        QueueItem {
+            track: Track {
+                title: format!("Track {}", num),
+                track_num: num,
+                duration: 180.0,
+                stream_url: None,
+            },
+            item_id: 1,
+            album_title: "Album".to_string(),
+            artist_name: "Artist".to_string(),
+            art_url: None,
+            about: None,
+            credits: None,
+            release_date: None,
+        }
+    }
+
+    #[test]
+    fn empty_queue() {
+        let q = PlayQueue::new();
+        assert!(q.current_item().is_none());
+        assert_eq!(q.current, None);
+    }
+
+    #[test]
+    fn replace_all_sets_current() {
+        let mut q = PlayQueue::new();
+        q.replace_all(vec![make_item(1), make_item(2), make_item(3)], 1);
+        assert_eq!(q.current, Some(1));
+        assert_eq!(q.current_item().unwrap().track.track_num, 2);
+    }
+
+    #[test]
+    fn replace_all_clamps_start_index() {
+        let mut q = PlayQueue::new();
+        q.replace_all(vec![make_item(1)], 10);
+        assert_eq!(q.current, Some(0));
+    }
+
+    #[test]
+    fn replace_all_empty() {
+        let mut q = PlayQueue::new();
+        q.replace_all(vec![], 0);
+        assert_eq!(q.current, None);
+    }
+
+    #[test]
+    fn next_advances() {
+        let mut q = PlayQueue::new();
+        q.replace_all(vec![make_item(1), make_item(2), make_item(3)], 0);
+        let item = q.next().unwrap();
+        assert_eq!(item.track.track_num, 2);
+        assert_eq!(q.current, Some(1));
+    }
+
+    #[test]
+    fn next_at_end_returns_none() {
+        let mut q = PlayQueue::new();
+        q.replace_all(vec![make_item(1), make_item(2)], 1);
+        assert!(q.next().is_none());
+        assert_eq!(q.current, Some(1));
+    }
+
+    #[test]
+    fn prev_goes_back() {
+        let mut q = PlayQueue::new();
+        q.replace_all(vec![make_item(1), make_item(2), make_item(3)], 2);
+        let item = q.prev().unwrap();
+        assert_eq!(item.track.track_num, 2);
+    }
+
+    #[test]
+    fn prev_at_start_stays() {
+        let mut q = PlayQueue::new();
+        q.replace_all(vec![make_item(1), make_item(2)], 0);
+        let item = q.prev().unwrap();
+        assert_eq!(item.track.track_num, 1);
+        assert_eq!(q.current, Some(0));
+    }
+
+    #[test]
+    fn next_on_empty_queue() {
+        let mut q = PlayQueue::new();
+        assert!(q.next().is_none());
+    }
+
+    #[test]
+    fn prev_on_empty_queue() {
+        let mut q = PlayQueue::new();
+        assert!(q.prev().is_none());
+    }
+}
