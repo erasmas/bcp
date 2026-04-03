@@ -46,9 +46,7 @@ pub fn extract_bandcamp_cookie() -> Result<Option<String>> {
         if !base_path.exists() {
             continue;
         }
-        eprintln!("Trying Firefox-based browser at {:?}", base_path);
         if let Some(cookie) = try_firefox_profiles(base_path, &domains)? {
-            eprintln!("Found identity cookie in {:?}", base_path);
             return Ok(Some(cookie));
         }
     }
@@ -76,9 +74,7 @@ fn try_firefox_profiles(base_path: &std::path::Path, domains: &[String]) -> Resu
                             return Ok(Some(cookie));
                         }
                     }
-                    Err(e) => {
-                        eprintln!("  Profile {:?}: {}", entry.path(), e);
-                    }
+                    Err(_) => {}
                 }
             }
         }

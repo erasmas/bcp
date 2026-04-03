@@ -129,6 +129,7 @@ impl App {
                 let view = DownloadedView {
                     albums: &self.albums,
                     library: &self.library,
+                    filter: &self.downloaded_filter,
                 };
                 frame.render_stateful_widget(view, chunks[1], &mut self.downloaded_state);
             }
@@ -177,7 +178,7 @@ impl App {
         }
 
         let status_chunks =
-            Layout::horizontal([Constraint::Length(62), Constraint::Min(10)]).split(status_area);
+            Layout::horizontal([Constraint::Length(56), Constraint::Min(5)]).split(status_area);
 
         let tab_index = match self.view {
             View::Collection => 0,
@@ -194,17 +195,14 @@ impl App {
         .select(tab_index)
         .style(theme::dim())
         .highlight_style(theme::selected())
-        .divider(" ");
+        .divider("");
         frame.render_widget(tabs, status_chunks[0]);
 
-        let hint_text = if !self.status_msg.is_empty() {
-            format!(" {} ", self.status_msg)
-        } else {
-            " quit(q)  pause(\u{2423})  next(n)  prev(p)  search(/) ".to_string()
-        };
-        let hints = ratatui::widgets::Paragraph::new(hint_text)
-            .style(theme::dim())
-            .alignment(ratatui::layout::Alignment::Right);
-        frame.render_widget(hints, status_chunks[1]);
+        if !self.status_msg.is_empty() {
+            let status = ratatui::widgets::Paragraph::new(format!(" {} ", self.status_msg))
+                .style(theme::dim())
+                .alignment(ratatui::layout::Alignment::Right);
+            frame.render_widget(status, status_chunks[1]);
+        }
     }
 }

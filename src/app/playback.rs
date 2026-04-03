@@ -114,13 +114,26 @@ impl App {
     }
 
     pub(crate) async fn download_selected_album(&mut self) {
-        let album_idx = match self.view {
+        let selected = match self.view {
             super::View::Collection => self.collection_state.selected(),
             super::View::Downloaded => self.downloaded_state.selected(),
             _ => None,
         };
 
-        let Some(idx) = album_idx else { return };
+        let Some(selected) = selected else { return };
+
+        // Map filtered index to actual album index
+        let idx = match self.view {
+            super::View::Collection => {
+                self.resolve_filtered_index(selected, &self.collection_filter, false)
+            }
+            super::View::Downloaded => {
+                self.resolve_filtered_index(selected, &self.downloaded_filter, false)
+            }
+            _ => Some(selected),
+        };
+
+        let Some(idx) = idx else { return };
         if idx >= self.albums.len() {
             return;
         }

@@ -56,6 +56,7 @@ pub struct App {
     pub pause_accumulated: f64,
     pub collection_filter: String,
     pub album_filter: String,
+    pub downloaded_filter: String,
     pub filter_mode: bool,
     pub status_msg: String,
     pub should_quit: bool,
@@ -90,6 +91,7 @@ impl App {
             pause_accumulated: 0.0,
             collection_filter: String::new(),
             album_filter: String::new(),
+            downloaded_filter: String::new(),
             filter_mode: false,
             status_msg: String::new(),
             should_quit: false,
@@ -289,6 +291,7 @@ impl App {
         match self.view {
             View::Collection => &self.collection_filter,
             View::Album => &self.album_filter,
+            View::Downloaded => &self.downloaded_filter,
             _ => "",
         }
     }
@@ -297,7 +300,35 @@ impl App {
         match self.view {
             View::Collection => &mut self.collection_filter,
             View::Album => &mut self.album_filter,
+            View::Downloaded => &mut self.downloaded_filter,
             _ => &mut self.collection_filter,
         }
+    }
+
+    /// Map a filtered list selection index back to the actual album index.
+    pub(crate) fn resolve_filtered_index(
+        &self,
+        selected: usize,
+        filter: &str,
+        library_only: bool,
+    ) -> Option<usize> {
+        let q = filter.to_lowercase();
+        let filtered: Vec<usize> = self
+            .albums
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| {
+                if library_only && !self.library.albums.contains_key(&a.item_id) {
+                    return false;
+                }
+                if filter.is_empty() {
+                    return true;
+                }
+                a.album_title.to_lowercase().contains(&q)
+                    || a.artist_name.to_lowercase().contains(&q)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        filtered.get(selected).copied()
     }
 }

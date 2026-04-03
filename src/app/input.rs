@@ -168,6 +168,7 @@ impl App {
                 match self.view {
                     View::Collection => self.collection_state.select(Some(0)),
                     View::Album => self.album_state.select(Some(0)),
+                    View::Downloaded => self.downloaded_state.select(Some(0)),
                     _ => {}
                 }
             }
@@ -211,7 +212,21 @@ impl App {
                     .unwrap_or(0);
                 (&mut self.album_state, len)
             }
-            View::Downloaded => (&mut self.downloaded_state, self.albums.len()),
+            View::Downloaded => {
+                let filtered_len = if self.downloaded_filter.is_empty() {
+                    self.albums.len()
+                } else {
+                    let q = self.downloaded_filter.to_lowercase();
+                    self.albums
+                        .iter()
+                        .filter(|a| {
+                            a.album_title.to_lowercase().contains(&q)
+                                || a.artist_name.to_lowercase().contains(&q)
+                        })
+                        .count()
+                };
+                (&mut self.downloaded_state, filtered_len)
+            }
             View::Settings => return,
         };
 
@@ -340,12 +355,14 @@ impl App {
                 let Some(selected) = self.downloaded_state.selected() else {
                     return Ok(());
                 };
-                if selected >= self.albums.len() {
-                    return Ok(());
-                }
 
-                self.load_album_details(selected).await?;
-                self.selected_album_idx = Some(selected);
+                let actual_idx = match self.resolve_filtered_index(selected, &self.downloaded_filter, false) {
+                    Some(idx) => idx,
+                    None => return Ok(()),
+                };
+
+                self.load_album_details(actual_idx).await?;
+                self.selected_album_idx = Some(actual_idx);
                 self.album_state.select(Some(0));
                 self.view = View::Album;
                 self.status_msg = String::new();

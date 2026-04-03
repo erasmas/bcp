@@ -12,16 +12,36 @@ use crate::ui::theme;
 pub struct DownloadedView<'a> {
     pub albums: &'a [Album],
     pub library: &'a LibraryIndex,
+    pub filter: &'a str,
+}
+
+impl<'a> DownloadedView<'a> {
+    pub fn filtered_albums(&self) -> Vec<(usize, &'a Album)> {
+        if self.filter.is_empty() {
+            self.albums.iter().enumerate().collect()
+        } else {
+            let q = self.filter.to_lowercase();
+            self.albums
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| {
+                    a.album_title.to_lowercase().contains(&q)
+                        || a.artist_name.to_lowercase().contains(&q)
+                })
+                .collect()
+        }
+    }
 }
 
 impl<'a> StatefulWidget for DownloadedView<'a> {
     type State = ListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
-        let items: Vec<ListItem> = self
-            .albums
+        let filtered = self.filtered_albums();
+
+        let items: Vec<ListItem> = filtered
             .iter()
-            .map(|album| {
+            .map(|(_, album)| {
                 let dl = self.library.albums.get(&album.item_id);
 
                 let is_downloaded = dl.is_some_and(|a| a.status == AlbumDownloadStatus::Complete);
@@ -61,7 +81,10 @@ impl<'a> StatefulWidget for DownloadedView<'a> {
             })
             .collect();
 
-        let title = format!(" Downloaded ({}) ", self.library.albums.len());
+        let downloaded_count = self.library.albums.values()
+            .filter(|a| a.status == AlbumDownloadStatus::Complete)
+            .count();
+        let title = format!(" Downloaded ({}) ", downloaded_count);
 
         let list = List::new(items)
             .block(
