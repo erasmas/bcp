@@ -8,6 +8,7 @@ pub enum PlayerCommand {
     Play(Vec<u8>),
     Pause,
     Resume,
+    Shutdown,
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +23,7 @@ pub enum PlayerEvent {
 pub struct AudioEngine {
     cmd_tx: mpsc::UnboundedSender<PlayerCommand>,
     pub event_rx: mpsc::UnboundedReceiver<PlayerEvent>,
+    thread_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl AudioEngine {
@@ -29,11 +31,15 @@ impl AudioEngine {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
-        std::thread::spawn(move || {
+        let thread_handle = std::thread::spawn(move || {
             audio_thread(cmd_rx, event_tx);
         });
 
-        Ok(Self { cmd_tx, event_rx })
+        Ok(Self {
+            cmd_tx,
+            event_rx,
+            thread_handle: Some(thread_handle),
+        })
     }
 
     pub fn play(&self, mp3_data: Vec<u8>) -> Result<()> {
@@ -49,6 +55,15 @@ impl AudioEngine {
     pub fn resume(&self) -> Result<()> {
         self.cmd_tx.send(PlayerCommand::Resume)?;
         Ok(())
+    }
+}
+
+impl Drop for AudioEngine {
+    fn drop(&mut self) {
+        let _ = self.cmd_tx.send(PlayerCommand::Shutdown);
+        if let Some(handle) = self.thread_handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -98,6 +113,12 @@ fn audio_thread(
                         sink.play();
                         let _ = event_tx.send(PlayerEvent::Resumed);
                     }
+                }
+                PlayerCommand::Shutdown => {
+                    if let Some(sink) = current_sink.take() {
+                        sink.stop();
+                    }
+                    break;
                 }
             },
             Err(mpsc::error::TryRecvError::Empty) => {
