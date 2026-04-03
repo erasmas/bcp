@@ -1,5 +1,16 @@
 use anyhow::Result;
+use serde::Deserialize;
 use std::path::PathBuf;
+
+#[derive(Debug, Default, Deserialize)]
+struct Config {
+    library: Option<LibraryConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LibraryConfig {
+    path: Option<String>,
+}
 
 pub fn config_dir() -> Result<PathBuf> {
     let dir = dirs::config_dir()
@@ -21,20 +32,16 @@ pub fn cache_dir() -> Result<PathBuf> {
 /// Reads from ~/.config/bcp/config.toml [library] path if set,
 /// otherwise defaults to ~/Music/bcp/.
 pub fn library_dir() -> Result<PathBuf> {
-    // Check config.toml for custom path
     let config_path = config_dir()?.join("config.toml");
     if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)?;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("path") {
-                if let Some(val) = trimmed.split('=').nth(1) {
-                    let val = val.trim().trim_matches('"').trim_matches('\'');
-                    if !val.is_empty() {
-                        let dir = PathBuf::from(shellexpand(val));
-                        std::fs::create_dir_all(&dir)?;
-                        return Ok(dir);
-                    }
+        let config: Config = toml::from_str(&content).unwrap_or_default();
+        if let Some(lib) = config.library {
+            if let Some(path) = lib.path {
+                if !path.is_empty() {
+                    let dir = PathBuf::from(shellexpand(&path));
+                    std::fs::create_dir_all(&dir)?;
+                    return Ok(dir);
                 }
             }
         }
