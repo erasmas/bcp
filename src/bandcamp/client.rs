@@ -103,6 +103,7 @@ impl BandcampClient {
     /// Fetch all collection pages
     pub async fn fetch_full_collection(&self, fan_id: u64) -> Result<Vec<Album>> {
         let mut albums = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
         let mut token: Option<String> = None;
 
         loop {
@@ -111,8 +112,12 @@ impl BandcampClient {
                 .await?;
 
             for item in &resp.items {
+                let id = item.sale_item_id.or(item.item_id).unwrap_or(0);
+                if !seen_ids.insert(id) {
+                    continue; // skip duplicate
+                }
                 let album = Album {
-                    item_id: item.sale_item_id.or(item.item_id).unwrap_or(0),
+                    item_id: id,
                     album_title: item.item_title.clone().unwrap_or_default(),
                     artist_name: item.band_name.clone().unwrap_or_default(),
                     item_url: item.item_url.clone().unwrap_or_default(),

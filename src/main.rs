@@ -153,6 +153,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                         app.login_step = app::LoginStep::Prompt;
                     }
                 }
+                app.dirty = true;
             }
 
             if app.dirty {
