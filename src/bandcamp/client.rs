@@ -39,11 +39,18 @@ impl BandcampClient {
         let status = resp.status();
         let body = resp.text().await?;
 
+        if status == reqwest::StatusCode::UNAUTHORIZED
+            || status == reqwest::StatusCode::FORBIDDEN
+        {
+            anyhow::bail!(
+                "Session expired — please run `bcp login` to re-authenticate"
+            );
+        }
         if !status.is_success() {
             anyhow::bail!(
-                "Collection summary API returned {} — cookie may be expired.\nCookie value: {}...",
+                "Collection summary API returned {}: {}",
                 status,
-                &self.identity_cookie[..self.identity_cookie.len().min(20)]
+                &body
             );
         }
 
@@ -90,6 +97,13 @@ impl BandcampClient {
             .context("Failed to fetch collection")?;
 
         let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED
+            || status == reqwest::StatusCode::FORBIDDEN
+        {
+            anyhow::bail!(
+                "Session expired — please run `bcp login` to re-authenticate"
+            );
+        }
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("Collection API returned {}: {}", status, text);
