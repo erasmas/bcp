@@ -68,13 +68,10 @@ fn try_firefox_profiles(base_path: &std::path::Path, domains: &[String]) -> Resu
             let cookies_db = entry.path().join("cookies.sqlite");
             if cookies_db.exists() {
                 let db_path = cookies_db.to_string_lossy().to_string();
-                match rookie::any_browser(&db_path, Some(domains.to_vec()), None) {
-                    Ok(cookies) => {
-                        if let Some(cookie) = find_identity_cookie(&cookies) {
-                            return Ok(Some(cookie));
-                        }
-                    }
-                    Err(_) => {}
+                if let Ok(cookies) = rookie::any_browser(&db_path, Some(domains.to_vec()), None)
+                    && let Some(cookie) = find_identity_cookie(&cookies)
+                {
+                    return Ok(Some(cookie));
                 }
             }
         }

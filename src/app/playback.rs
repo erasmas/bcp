@@ -205,13 +205,13 @@ impl App {
                 self.albums[idx].artist_name, self.albums[idx].album_title
             );
             self.dirty = true;
-            if let Some(ref client) = self.client {
-                if let Ok(detail) = client.fetch_album_details(&url).await {
-                    self.albums[idx].tracks = detail.tracks;
-                    self.albums[idx].about = detail.about;
-                    self.albums[idx].credits = detail.credits;
-                    self.albums[idx].release_date = detail.release_date;
-                }
+            if let Some(ref client) = self.client
+                && let Ok(detail) = client.fetch_album_details(&url).await
+            {
+                self.albums[idx].tracks = detail.tracks;
+                self.albums[idx].about = detail.about;
+                self.albums[idx].credits = detail.credits;
+                self.albums[idx].release_date = detail.release_date;
             }
         }
 

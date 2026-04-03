@@ -42,7 +42,7 @@ impl App {
                 if key.code == KeyCode::Enter {
                     auth::open_login_page()?;
                     self.login_step = LoginStep::WaitingForBrowser;
-                    self.status_msg = "Browser opened — log in, then press Enter here".to_string();
+                    self.status_msg = "Browser opened - log in, then press Enter here".to_string();
                 } else if key.code == KeyCode::Char('q') {
                     self.should_quit = true;
                 }
@@ -68,7 +68,7 @@ impl App {
                         None => {
                             self.login_step = LoginStep::WaitingForBrowser;
                             self.status_msg =
-                                "Could not find cookie — make sure you're logged in, then press Enter"
+                                "Could not find cookie - make sure you're logged in, then press Enter"
                                     .to_string();
                         }
                     }

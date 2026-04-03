@@ -152,10 +152,10 @@ pub fn download_album(
         // Download cover art
         if let Some(art) = art_url {
             let art_sized = art.replace("_16.", "_5.");
-            if let Ok(resp) = client.get(&art_sized).send().await {
-                if let Ok(bytes) = resp.bytes().await {
-                    let _ = std::fs::write(dir.join("cover.jpg"), &bytes);
-                }
+            if let Ok(resp) = client.get(&art_sized).send().await
+                && let Ok(bytes) = resp.bytes().await
+            {
+                let _ = std::fs::write(dir.join("cover.jpg"), &bytes);
             }
         }
 

@@ -60,10 +60,10 @@ impl PlayQueue {
         if self.items.is_empty() {
             return None;
         }
-        if let Some(cur) = self.current {
-            if cur > 0 {
-                self.current = Some(cur - 1);
-            }
+        if let Some(cur) = self.current
+            && cur > 0
+        {
+            self.current = Some(cur - 1);
         }
         self.current_item()
     }

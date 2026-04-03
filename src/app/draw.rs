@@ -112,17 +112,17 @@ impl App {
                 frame.render_stateful_widget(view, chunks[1], &mut self.collection_state);
             }
             View::Album => {
-                if let Some(idx) = self.selected_album_idx {
-                    if let Some(album) = self.albums.get(idx) {
-                        let current = self.queue.current_item();
-                        let view = AlbumView {
-                            album,
-                            playing_album_id: current.map(|q| q.item_id),
-                            playing_track_num: current.map(|q| q.track.track_num),
-                            filtered_indices: &self.album_filtered_indices,
-                        };
-                        frame.render_stateful_widget(view, chunks[1], &mut self.album_state);
-                    }
+                if let Some(idx) = self.selected_album_idx
+                    && let Some(album) = self.albums.get(idx)
+                {
+                    let current = self.queue.current_item();
+                    let view = AlbumView {
+                        album,
+                        playing_album_id: current.map(|q| q.item_id),
+                        playing_track_num: current.map(|q| q.track.track_num),
+                        filtered_indices: &self.album_filtered_indices,
+                    };
+                    frame.render_stateful_widget(view, chunks[1], &mut self.album_state);
                 }
             }
             View::Downloaded => {
@@ -162,7 +162,7 @@ impl App {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis();
-            let cursor = if (now / 500) % 2 == 0 {
+            let cursor = if (now / 500).is_multiple_of(2) {
                 "\u{2502}"
             } else {
                 " "

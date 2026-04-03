@@ -79,11 +79,11 @@ fn audio_thread(
     let mut current_sink: Option<Sink> = None;
 
     loop {
-        if let Some(ref sink) = current_sink {
-            if sink.empty() {
-                current_sink = None;
-                let _ = event_tx.send(PlayerEvent::Finished);
-            }
+        if let Some(ref sink) = current_sink
+            && sink.empty()
+        {
+            current_sink = None;
+            let _ = event_tx.send(PlayerEvent::Finished);
         }
 
         match cmd_rx.try_recv() {

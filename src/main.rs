@@ -137,7 +137,10 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                     app.collection_state.select(Some(0));
                 }
                 app.view = app::View::Downloaded;
-                app.status_msg = format!("Offline mode ({} downloaded albums)", app.library.albums.len());
+                app.status_msg = format!(
+                    "Offline mode ({} downloaded albums)",
+                    app.library.albums.len()
+                );
             } else {
                 app.status_msg = format!("Error: {}", e);
                 app.screen = app::AppScreen::Login;
@@ -167,7 +170,10 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                             app.collection_state.select(Some(0));
                         }
                         app.view = app::View::Downloaded;
-                        app.status_msg = format!("Offline mode ({} downloaded albums)", app.library.albums.len());
+                        app.status_msg = format!(
+                            "Offline mode ({} downloaded albums)",
+                            app.library.albums.len()
+                        );
                     } else {
                         app.status_msg = format!("Error: {}", e);
                         if app.auth.is_none() {

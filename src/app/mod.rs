@@ -189,13 +189,13 @@ impl App {
             self.dirty = true;
         }
 
-        if let Some(started) = self.play_started {
-            if !self.is_paused {
-                let new_elapsed = started.elapsed().as_secs_f64() - self.pause_accumulated;
-                if (new_elapsed - self.elapsed).abs() > 0.1 {
-                    self.elapsed = new_elapsed;
-                    self.dirty = true;
-                }
+        if let Some(started) = self.play_started
+            && !self.is_paused
+        {
+            let new_elapsed = started.elapsed().as_secs_f64() - self.pause_accumulated;
+            if (new_elapsed - self.elapsed).abs() > 0.1 {
+                self.elapsed = new_elapsed;
+                self.dirty = true;
             }
         }
 
@@ -218,40 +218,40 @@ impl App {
         }
 
         // Check for MP3 download result
-        if let Some(ref mut rx) = self.mp3_rx {
-            if let Ok(result) = rx.try_recv() {
-                self.mp3_rx = None;
-                match result {
-                    Ok(data) => {
-                        if let Some(ref engine) = self.engine {
-                            engine.play(data)?;
-                            self.is_paused = false;
-                            self.play_started = Some(Instant::now());
-                            self.pause_accumulated = 0.0;
-                            self.elapsed = 0.0;
-                            self.meta_scroll = None;
-                            self.status_msg = String::new();
-                            self.dirty = true;
-                        }
-                    }
-                    Err(e) => {
-                        self.status_msg = format!("Stream error: {}", e);
+        if let Some(ref mut rx) = self.mp3_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.mp3_rx = None;
+            match result {
+                Ok(data) => {
+                    if let Some(ref engine) = self.engine {
+                        engine.play(data)?;
+                        self.is_paused = false;
+                        self.play_started = Some(Instant::now());
+                        self.pause_accumulated = 0.0;
+                        self.elapsed = 0.0;
+                        self.meta_scroll = None;
+                        self.status_msg = String::new();
                         self.dirty = true;
                     }
+                }
+                Err(e) => {
+                    self.status_msg = format!("Stream error: {}", e);
+                    self.dirty = true;
                 }
             }
         }
 
         // Check for art download result
-        if let Some(ref mut rx) = self.art_rx {
-            if let Ok(result) = rx.try_recv() {
-                self.art_rx = None;
-                if let Some(img) = result {
-                    if let Some(ref mut picker) = self.art_picker {
-                        self.art_protocol = Some(picker.new_resize_protocol(img));
-                        self.dirty = true;
-                    }
-                }
+        if let Some(ref mut rx) = self.art_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.art_rx = None;
+            if let Some(img) = result
+                && let Some(ref mut picker) = self.art_picker
+            {
+                self.art_protocol = Some(picker.new_resize_protocol(img));
+                self.dirty = true;
             }
         }
 
@@ -261,12 +261,11 @@ impl App {
             while let Ok(event) = rx.try_recv() {
                 match event {
                     DownloadEvent::TrackDone { item_id, track_num } => {
-                        if let Some(album) = self.library.albums.get_mut(&item_id) {
-                            if let Some(track) =
+                        if let Some(album) = self.library.albums.get_mut(&item_id)
+                            && let Some(track) =
                                 album.tracks.iter_mut().find(|t| t.track_num == track_num)
-                            {
-                                track.downloaded = true;
-                            }
+                        {
+                            track.downloaded = true;
                         }
                         self.dirty = true;
                     }

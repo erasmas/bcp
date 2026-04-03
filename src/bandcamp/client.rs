@@ -39,19 +39,11 @@ impl BandcampClient {
         let status = resp.status();
         let body = resp.text().await?;
 
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || status == reqwest::StatusCode::FORBIDDEN
-        {
-            anyhow::bail!(
-                "Session expired — please run `bcp login` to re-authenticate"
-            );
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            anyhow::bail!("Session expired - please run `bcp login` to re-authenticate");
         }
         if !status.is_success() {
-            anyhow::bail!(
-                "Collection summary API returned {}: {}",
-                status,
-                &body
-            );
+            anyhow::bail!("Collection summary API returned {}: {}", status, &body);
         }
 
         let data: serde_json::Value =
@@ -97,12 +89,8 @@ impl BandcampClient {
             .context("Failed to fetch collection")?;
 
         let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || status == reqwest::StatusCode::FORBIDDEN
-        {
-            anyhow::bail!(
-                "Session expired — please run `bcp login` to re-authenticate"
-            );
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            anyhow::bail!("Session expired - please run `bcp login` to re-authenticate");
         }
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();

@@ -110,7 +110,7 @@ fn render_playing(
         format_duration(duration)
     );
 
-    // Line 1: icon + artist — track title + time
+    // Line 1: icon + artist - track title + time
     let title_line = Line::from(vec![
         Span::styled(format!(" {} ", icon), theme::playing()),
         Span::styled(&item.artist_name, theme::normal()),
@@ -139,7 +139,7 @@ fn render_playing(
         }
     }
 
-    // Line 3+: album metadata (about, credits, release date) — auto-scrolling
+    // Line 3+: album metadata (about, credits, release date) - auto-scrolling
     if area.height > 3 {
         let max_width = area.width.saturating_sub(4) as usize;
         let visible_rows = (area.height - 3) as usize;
@@ -199,7 +199,7 @@ fn render_playing(
 }
 
 fn format_release_date(date: &str) -> String {
-    // Bandcamp dates are like "16 Jan 2026 00:00:00 GMT" — extract the readable part
+    // Bandcamp dates are like "16 Jan 2026 00:00:00 GMT" - extract the readable part
     let parts: Vec<&str> = date.split_whitespace().collect();
     if parts.len() >= 3 {
         format!("{} {} {}", parts[0], parts[1], parts[2])

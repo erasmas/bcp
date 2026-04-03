@@ -36,14 +36,13 @@ pub fn library_dir() -> Result<PathBuf> {
     if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)?;
         let config: Config = toml::from_str(&content).unwrap_or_default();
-        if let Some(lib) = config.library {
-            if let Some(path) = lib.path {
-                if !path.is_empty() {
-                    let dir = PathBuf::from(shellexpand(&path));
-                    std::fs::create_dir_all(&dir)?;
-                    return Ok(dir);
-                }
-            }
+        if let Some(lib) = config.library
+            && let Some(path) = lib.path
+            && !path.is_empty()
+        {
+            let dir = PathBuf::from(shellexpand(&path));
+            std::fs::create_dir_all(&dir)?;
+            return Ok(dir);
         }
     }
 
@@ -57,10 +56,10 @@ pub fn library_dir() -> Result<PathBuf> {
 }
 
 fn shellexpand(path: &str) -> String {
-    if path.starts_with("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return format!("{}/{}", home.display(), &path[2..]);
-        }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return format!("{}/{}", home.display(), rest);
     }
     path.to_string()
 }
