@@ -67,7 +67,9 @@ impl LibraryIndex {
     pub fn save(&self) -> Result<()> {
         let path = Self::index_path()?;
         let data = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, data)?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, data)?;
+        std::fs::rename(&tmp, &path)?;
         Ok(())
     }
 
