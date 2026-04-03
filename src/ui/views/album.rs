@@ -11,6 +11,7 @@ use crate::ui::widgets::format_duration;
 
 pub struct AlbumView<'a> {
     pub album: &'a Album,
+    pub playing_album_id: Option<u64>,
     pub playing_track_num: Option<u32>,
 }
 
@@ -18,16 +19,18 @@ impl<'a> StatefulWidget for AlbumView<'a> {
     type State = ListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
+        let is_playing_album = self.playing_album_id == Some(self.album.item_id);
+
         let items: Vec<ListItem> = self
             .album
             .tracks
             .iter()
             .map(|track| {
-                let is_playing = self
-                    .playing_track_num
-                    .is_some_and(|n| n == track.track_num);
+                let is_playing = is_playing_album
+                    && self
+                        .playing_track_num
+                        .is_some_and(|n| n == track.track_num);
 
-                let prefix = if is_playing { "\u{25B6} " } else { "  " };
                 let style = if is_playing {
                     theme::playing()
                 } else {
@@ -35,7 +38,6 @@ impl<'a> StatefulWidget for AlbumView<'a> {
                 };
 
                 let line = Line::from(vec![
-                    Span::styled(prefix, style),
                     Span::styled(
                         format!("{:2}. ", track.track_num),
                         theme::dim(),

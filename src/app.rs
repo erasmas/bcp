@@ -963,13 +963,11 @@ impl App {
             View::Album => {
                 if let Some(idx) = self.selected_album_idx {
                     if let Some(album) = self.albums.get(idx) {
-                        let playing_track = self
-                            .queue
-                            .current_item()
-                            .map(|q| q.track.track_num);
+                        let current = self.queue.current_item();
                         let view = AlbumView {
                             album,
-                            playing_track_num: playing_track,
+                            playing_album_id: current.map(|q| q.item_id),
+                            playing_track_num: current.map(|q| q.track.track_num),
                         };
                         frame.render_stateful_widget(view, chunks[1], &mut self.album_state);
                     }
