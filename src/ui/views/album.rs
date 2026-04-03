@@ -44,9 +44,7 @@ impl<'a> StatefulWidget for AlbumView<'a> {
             .iter()
             .map(|(_, track)| {
                 let is_playing = is_playing_album
-                    && self
-                        .playing_track_num
-                        .is_some_and(|n| n == track.track_num);
+                    && self.playing_track_num.is_some_and(|n| n == track.track_num);
 
                 let style = if is_playing {
                     theme::playing()
@@ -55,10 +53,7 @@ impl<'a> StatefulWidget for AlbumView<'a> {
                 };
 
                 let line = Line::from(vec![
-                    Span::styled(
-                        format!("{:2}. ", track.track_num),
-                        theme::dim(),
-                    ),
+                    Span::styled(format!("{:2}. ", track.track_num), theme::dim()),
                     Span::styled(&track.title, style),
                     Span::styled(
                         format!("  {}", format_duration(track.duration)),
@@ -69,10 +64,7 @@ impl<'a> StatefulWidget for AlbumView<'a> {
             })
             .collect();
 
-        let title = format!(
-            " {} - {} ",
-            self.album.artist_name, self.album.album_title
-        );
+        let title = format!(" {} - {} ", self.album.artist_name, self.album.album_title);
 
         let list = List::new(items)
             .block(

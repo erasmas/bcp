@@ -20,10 +20,7 @@ impl App {
             AppScreen::Loading => {}
             AppScreen::Main => {
                 if self.filter_mode {
-                    let is_nav = matches!(
-                        key.code,
-                        KeyCode::Up | KeyCode::Down | KeyCode::Enter
-                    );
+                    let is_nav = matches!(key.code, KeyCode::Up | KeyCode::Down | KeyCode::Enter);
                     if !is_nav {
                         self.handle_filter_key(key)?;
                         return Ok(());
@@ -92,7 +89,9 @@ impl App {
                     self.active_filter_mut().clear();
                 } else {
                     match self.view {
-                        View::Album | View::Downloaded | View::Settings => self.view = View::Collection,
+                        View::Album | View::Downloaded | View::Settings => {
+                            self.view = View::Collection
+                        }
                         _ => {}
                     }
                 }
@@ -203,7 +202,10 @@ impl App {
                             a.tracks.len()
                         } else {
                             let q = self.album_filter.to_lowercase();
-                            a.tracks.iter().filter(|t| t.title.to_lowercase().contains(&q)).count()
+                            a.tracks
+                                .iter()
+                                .filter(|t| t.title.to_lowercase().contains(&q))
+                                .count()
                         }
                     })
                     .unwrap_or(0);

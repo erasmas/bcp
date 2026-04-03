@@ -25,7 +25,8 @@ impl<'a> StatefulWidget for DownloadedView<'a> {
                 let dl = self.library.albums.get(&album.item_id);
 
                 let is_downloaded = dl.is_some_and(|a| a.status == AlbumDownloadStatus::Complete);
-                let is_downloading = dl.is_some_and(|a| a.status == AlbumDownloadStatus::Downloading);
+                let is_downloading =
+                    dl.is_some_and(|a| a.status == AlbumDownloadStatus::Downloading);
 
                 let name_style = if is_downloaded || is_downloading {
                     theme::normal()

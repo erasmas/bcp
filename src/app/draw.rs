@@ -1,6 +1,6 @@
 use ratatui::{
-    layout::{Constraint, Layout},
     Frame,
+    layout::{Constraint, Layout},
 };
 use ratatui_image::StatefulImage;
 
@@ -8,9 +8,9 @@ use super::{App, AppScreen, LoginStep, View};
 use crate::ui::theme;
 use crate::ui::views::album::AlbumView;
 use crate::ui::views::collection::CollectionView;
-use crate::ui::views::settings::SettingsView;
 use crate::ui::views::downloaded::DownloadedView;
 use crate::ui::views::now_playing::NowPlayingBar;
+use crate::ui::views::settings::SettingsView;
 
 impl App {
     pub fn draw(&mut self, frame: &mut Frame) {
@@ -133,10 +133,15 @@ impl App {
                 frame.render_stateful_widget(view, chunks[1], &mut self.downloaded_state);
             }
             View::Settings => {
-                let username = self.auth.as_ref()
+                let username = self
+                    .auth
+                    .as_ref()
                     .and_then(|a| a.username.as_deref())
                     .unwrap_or("not logged in");
-                let downloaded_count = self.library.albums.values()
+                let downloaded_count = self
+                    .library
+                    .albums
+                    .values()
                     .filter(|a| a.status == crate::library::AlbumDownloadStatus::Complete)
                     .count();
                 let view = SettingsView {
@@ -156,21 +161,23 @@ impl App {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis();
-            let cursor = if (now / 500) % 2 == 0 { "\u{2502}" } else { " " };
+            let cursor = if (now / 500) % 2 == 0 {
+                "\u{2502}"
+            } else {
+                " "
+            };
             let search_text = format!(" search: {}{}", self.active_filter(), cursor);
-            let search_bar = ratatui::widgets::Paragraph::new(search_text)
-                .style(ratatui::style::Style::default()
+            let search_bar = ratatui::widgets::Paragraph::new(search_text).style(
+                ratatui::style::Style::default()
                     .fg(theme::ACCENT)
-                    .add_modifier(ratatui::style::Modifier::BOLD));
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            );
             frame.render_widget(search_bar, status_area);
             return;
         }
 
-        let status_chunks = Layout::horizontal([
-            Constraint::Length(62),
-            Constraint::Min(10),
-        ])
-        .split(status_area);
+        let status_chunks =
+            Layout::horizontal([Constraint::Length(62), Constraint::Min(10)]).split(status_area);
 
         let tab_index = match self.view {
             View::Collection => 0,

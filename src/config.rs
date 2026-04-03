@@ -57,4 +57,3 @@ fn shellexpand(path: &str) -> String {
     }
     path.to_string()
 }
-

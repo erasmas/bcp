@@ -18,7 +18,7 @@ pub struct NowPlayingBar<'a> {
     pub is_paused: bool,
     pub elapsed: f64,
     pub has_art: bool,
-    pub meta_scroll: Option<usize>,  // None = auto, Some(n) = manual offset
+    pub meta_scroll: Option<usize>, // None = auto, Some(n) = manual offset
 }
 
 impl<'a> NowPlayingBar<'a> {
@@ -74,7 +74,14 @@ impl<'a> Widget for NowPlayingBar<'a> {
                     width: inner.width.saturating_sub(art_offset),
                     height: inner.height,
                 };
-                render_playing(info_area, buf, item, self.is_paused, self.elapsed, self.meta_scroll);
+                render_playing(
+                    info_area,
+                    buf,
+                    item,
+                    self.is_paused,
+                    self.elapsed,
+                    self.meta_scroll,
+                );
             }
             None => {
                 render_idle(inner, buf);

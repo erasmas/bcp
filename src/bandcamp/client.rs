@@ -47,8 +47,8 @@ impl BandcampClient {
             );
         }
 
-        let data: serde_json::Value = serde_json::from_str(&body)
-            .context("Failed to parse collection summary")?;
+        let data: serde_json::Value =
+            serde_json::from_str(&body).context("Failed to parse collection summary")?;
 
         let fan_id = data
             .get("fan_id")
@@ -95,7 +95,9 @@ impl BandcampClient {
             anyhow::bail!("Collection API returned {}: {}", status, text);
         }
 
-        let data: CollectionResponse = resp.json().await
+        let data: CollectionResponse = resp
+            .json()
+            .await
             .context("Failed to parse collection response")?;
         Ok(data)
     }
@@ -107,9 +109,7 @@ impl BandcampClient {
         let mut token: Option<String> = None;
 
         loop {
-            let resp = self
-                .fetch_collection(fan_id, token.as_deref())
-                .await?;
+            let resp = self.fetch_collection(fan_id, token.as_deref()).await?;
 
             for item in &resp.items {
                 let id = item.sale_item_id.or(item.item_id).unwrap_or(0);
@@ -157,7 +157,6 @@ impl BandcampClient {
         let body = resp.text().await?;
         parse_album_page(&body)
     }
-
 }
 
 pub struct AlbumDetail {
@@ -168,21 +167,18 @@ pub struct AlbumDetail {
 }
 
 fn parse_album_page(html: &str) -> Result<AlbumDetail> {
-    let tralbum_json = extract_data_tralbum(html)
-        .context("Could not find track data on album page")?;
+    let tralbum_json =
+        extract_data_tralbum(html).context("Could not find track data on album page")?;
 
-    let data: TralbumData = serde_json::from_str(&tralbum_json)
-        .context("Failed to parse tralbum data")?;
+    let data: TralbumData =
+        serde_json::from_str(&tralbum_json).context("Failed to parse tralbum data")?;
 
     let tracks = data
         .trackinfo
         .unwrap_or_default()
         .into_iter()
         .map(|t| {
-            let stream_url = t
-                .file
-                .as_ref()
-                .and_then(|f| f.get("mp3-128").cloned());
+            let stream_url = t.file.as_ref().and_then(|f| f.get("mp3-128").cloned());
 
             Track {
                 title: t.title.unwrap_or_else(|| "Untitled".to_string()),
@@ -224,7 +220,6 @@ fn extract_data_tralbum(html: &str) -> Option<String> {
 
     Some(decoded)
 }
-
 
 fn chrono_like_timestamp() -> String {
     // Generate a Unix timestamp for "now" used as the initial token

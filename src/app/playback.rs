@@ -28,11 +28,15 @@ impl App {
             let (mp3_tx, mp3_rx) = tokio::sync::oneshot::channel();
             self.mp3_rx = Some(mp3_rx);
             tokio::spawn(async move {
-                let result = tokio::fs::read(&local_path).await
+                let result = tokio::fs::read(&local_path)
+                    .await
                     .map_err(|e| anyhow::anyhow!("{}", e));
                 let _ = mp3_tx.send(result);
             });
-            self.status_msg = format!("Playing (local): {} - {}", item.artist_name, item.track.title);
+            self.status_msg = format!(
+                "Playing (local): {} - {}",
+                item.artist_name, item.track.title
+            );
         } else {
             let Some(ref url) = item.track.stream_url else {
                 self.status_msg = "No stream URL for this track".to_string();
@@ -117,7 +121,9 @@ impl App {
         };
 
         let Some(idx) = album_idx else { return };
-        if idx >= self.albums.len() { return }
+        if idx >= self.albums.len() {
+            return;
+        }
 
         if self.library.is_downloaded(self.albums[idx].item_id) {
             self.status_msg = "Already downloaded".to_string();
@@ -145,7 +151,11 @@ impl App {
         }
 
         let album = &self.albums[idx];
-        let cookie = self.auth.as_ref().map(|a| a.identity_cookie.as_str()).unwrap_or("");
+        let cookie = self
+            .auth
+            .as_ref()
+            .map(|a| a.identity_cookie.as_str())
+            .unwrap_or("");
         let entry = library::prepare_album_entry(album);
         self.library.albums.insert(album.item_id, entry);
         let _ = self.library.save();
@@ -153,7 +163,8 @@ impl App {
         match library::download_album(album, cookie) {
             Ok(rx) => {
                 self.download_rx.push(rx);
-                self.status_msg = format!("Downloading: {} - {}", album.artist_name, album.album_title);
+                self.status_msg =
+                    format!("Downloading: {} - {}", album.artist_name, album.album_title);
             }
             Err(e) => {
                 self.status_msg = format!("Download error: {}", e);
@@ -163,17 +174,27 @@ impl App {
     }
 
     pub(crate) async fn download_all_albums(&mut self) {
-        let cookie = self.auth.as_ref().map(|a| a.identity_cookie.clone()).unwrap_or_default();
+        let cookie = self
+            .auth
+            .as_ref()
+            .map(|a| a.identity_cookie.clone())
+            .unwrap_or_default();
         let mut count = 0;
 
-        let indices_to_fetch: Vec<usize> = self.albums.iter().enumerate()
+        let indices_to_fetch: Vec<usize> = self
+            .albums
+            .iter()
+            .enumerate()
             .filter(|(_, a)| a.tracks.is_empty() && !self.library.is_downloaded(a.item_id))
             .map(|(i, _)| i)
             .collect();
 
         for idx in indices_to_fetch {
             let url = self.albums[idx].item_url.clone();
-            self.status_msg = format!("Fetching: {} - {}...", self.albums[idx].artist_name, self.albums[idx].album_title);
+            self.status_msg = format!(
+                "Fetching: {} - {}...",
+                self.albums[idx].artist_name, self.albums[idx].album_title
+            );
             self.dirty = true;
             if let Some(ref client) = self.client {
                 if let Ok(detail) = client.fetch_album_details(&url).await {

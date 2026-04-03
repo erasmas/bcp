@@ -251,7 +251,9 @@ impl App {
                 match event {
                     DownloadEvent::TrackDone { item_id, track_num } => {
                         if let Some(album) = self.library.albums.get_mut(&item_id) {
-                            if let Some(track) = album.tracks.iter_mut().find(|t| t.track_num == track_num) {
+                            if let Some(track) =
+                                album.tracks.iter_mut().find(|t| t.track_num == track_num)
+                            {
                                 track.downloaded = true;
                             }
                         }
@@ -260,7 +262,10 @@ impl App {
                     DownloadEvent::AlbumDone { item_id } => {
                         if let Some(album) = self.library.albums.get_mut(&item_id) {
                             album.status = library::AlbumDownloadStatus::Complete;
-                            self.status_msg = format!("Downloaded: {} - {}", album.artist_name, album.album_title);
+                            self.status_msg = format!(
+                                "Downloaded: {} - {}",
+                                album.artist_name, album.album_title
+                            );
                         }
                         let _ = self.library.save();
                         completed_indices.push(i);

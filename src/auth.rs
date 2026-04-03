@@ -26,23 +26,20 @@ pub fn save_auth(auth: &AuthData) -> Result<()> {
 }
 
 pub fn extract_bandcamp_cookie() -> Result<Option<String>> {
-    let domains = vec![
-        ".bandcamp.com".to_string(),
-        "bandcamp.com".to_string(),
-    ];
+    let domains = vec![".bandcamp.com".to_string(), "bandcamp.com".to_string()];
 
     // Try Firefox-based browsers via custom profile paths
     // (skip rookie::firefox/chrome/safari to avoid macOS Keychain prompts)
     let home = dirs::home_dir().unwrap_or_default();
     let firefox_based_paths = [
-        home.join("Library/Application Support/Firefox"),        // Firefox macOS
-        home.join(".mozilla/firefox"),                           // Firefox Linux
-        home.join("Library/Application Support/zen"),            // Zen macOS
-        home.join(".zen"),                                       // Zen Linux
-        home.join("Library/Application Support/librewolf"),      // LibreWolf macOS
-        home.join(".librewolf"),                                 // LibreWolf Linux
-        home.join("Library/Application Support/waterfox"),       // Waterfox macOS
-        home.join(".waterfox"),                                  // Waterfox Linux
+        home.join("Library/Application Support/Firefox"), // Firefox macOS
+        home.join(".mozilla/firefox"),                    // Firefox Linux
+        home.join("Library/Application Support/zen"),     // Zen macOS
+        home.join(".zen"),                                // Zen Linux
+        home.join("Library/Application Support/librewolf"), // LibreWolf macOS
+        home.join(".librewolf"),                          // LibreWolf Linux
+        home.join("Library/Application Support/waterfox"), // Waterfox macOS
+        home.join(".waterfox"),                           // Waterfox Linux
     ];
 
     for base_path in &firefox_based_paths {
@@ -62,10 +59,7 @@ pub fn extract_bandcamp_cookie() -> Result<Option<String>> {
 fn try_firefox_profiles(base_path: &std::path::Path, domains: &[String]) -> Result<Option<String>> {
     // Firefox-based browsers store profiles either directly under the base path
     // or nested under a "Profiles" subdirectory (e.g. Zen browser)
-    let search_dirs = [
-        base_path.to_path_buf(),
-        base_path.join("Profiles"),
-    ];
+    let search_dirs = [base_path.to_path_buf(), base_path.join("Profiles")];
 
     for search_dir in &search_dirs {
         let Ok(entries) = std::fs::read_dir(search_dir) else {

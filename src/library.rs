@@ -60,8 +60,7 @@ impl LibraryIndex {
             return Ok(Self::new());
         }
         let data = std::fs::read_to_string(&path)?;
-        let index: Self = serde_json::from_str(&data)
-            .context("Failed to parse library index")?;
+        let index: Self = serde_json::from_str(&data).context("Failed to parse library index")?;
         Ok(index)
     }
 
@@ -82,11 +81,7 @@ impl LibraryIndex {
         let base = config::library_dir().ok()?;
         let dir = album_dir(&base, &album.artist_name, &album.album_title);
         let path = dir.join(&track.file_name);
-        if path.exists() {
-            Some(path)
-        } else {
-            None
-        }
+        if path.exists() { Some(path) } else { None }
     }
 
     /// Check if an album is fully downloaded.
@@ -144,13 +139,7 @@ pub fn download_album(
     let tracks: Vec<_> = album
         .tracks
         .iter()
-        .map(|t| {
-            (
-                t.track_num,
-                t.title.clone(),
-                t.stream_url.clone(),
-            )
-        })
+        .map(|t| (t.track_num, t.title.clone(), t.stream_url.clone()))
         .collect();
     let art_url = album.art_url.clone();
     let cookie = identity_cookie.to_string();

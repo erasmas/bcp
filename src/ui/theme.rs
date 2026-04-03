@@ -1,8 +1,8 @@
 use ratatui::style::{Color, Modifier, Style};
 
 // Nord-inspired color scheme
-pub const FG: Color = Color::Rgb(216, 222, 233);     // Nord4
-pub const FG_DIM: Color = Color::Rgb(76, 86, 106);   // Nord3
+pub const FG: Color = Color::Rgb(216, 222, 233); // Nord4
+pub const FG_DIM: Color = Color::Rgb(76, 86, 106); // Nord3
 pub const ACCENT: Color = Color::Rgb(136, 192, 208); // Nord8
 pub const HIGHLIGHT: Color = Color::Rgb(163, 190, 140); // Nord14 green
 
