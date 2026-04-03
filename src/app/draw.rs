@@ -107,7 +107,7 @@ impl App {
             View::Collection => {
                 let view = CollectionView {
                     albums: &self.albums,
-                    filter: &self.collection_filter,
+                    filtered_indices: &self.collection_filtered_indices,
                 };
                 frame.render_stateful_widget(view, chunks[1], &mut self.collection_state);
             }
@@ -119,7 +119,7 @@ impl App {
                             album,
                             playing_album_id: current.map(|q| q.item_id),
                             playing_track_num: current.map(|q| q.track.track_num),
-                            filter: &self.album_filter,
+                            filtered_indices: &self.album_filtered_indices,
                         };
                         frame.render_stateful_widget(view, chunks[1], &mut self.album_state);
                     }
@@ -129,7 +129,7 @@ impl App {
                 let view = DownloadedView {
                     albums: &self.albums,
                     library: &self.library,
-                    filter: &self.downloaded_filter,
+                    filtered_indices: &self.downloaded_filtered_indices,
                 };
                 frame.render_stateful_widget(view, chunks[1], &mut self.downloaded_state);
             }

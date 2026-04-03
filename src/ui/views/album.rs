@@ -13,24 +13,7 @@ pub struct AlbumView<'a> {
     pub album: &'a Album,
     pub playing_album_id: Option<u64>,
     pub playing_track_num: Option<u32>,
-    pub filter: &'a str,
-}
-
-impl<'a> AlbumView<'a> {
-    /// Returns (original_index, track) pairs after filtering.
-    pub fn filtered_tracks(&self) -> Vec<(usize, &crate::bandcamp::models::Track)> {
-        if self.filter.is_empty() {
-            self.album.tracks.iter().enumerate().collect()
-        } else {
-            let q = self.filter.to_lowercase();
-            self.album
-                .tracks
-                .iter()
-                .enumerate()
-                .filter(|(_, t)| t.title.to_lowercase().contains(&q))
-                .collect()
-        }
-    }
+    pub filtered_indices: &'a [usize],
 }
 
 impl<'a> StatefulWidget for AlbumView<'a> {
@@ -38,11 +21,12 @@ impl<'a> StatefulWidget for AlbumView<'a> {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
         let is_playing_album = self.playing_album_id == Some(self.album.item_id);
-        let filtered = self.filtered_tracks();
 
-        let items: Vec<ListItem> = filtered
+        let items: Vec<ListItem> = self
+            .filtered_indices
             .iter()
-            .map(|(_, track)| {
+            .filter_map(|&i| self.album.tracks.get(i))
+            .map(|track| {
                 let is_playing = is_playing_album
                     && self.playing_track_num.is_some_and(|n| n == track.track_num);
 

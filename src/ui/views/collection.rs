@@ -10,36 +10,18 @@ use crate::ui::theme;
 
 pub struct CollectionView<'a> {
     pub albums: &'a [Album],
-    pub filter: &'a str,
-}
-
-impl<'a> CollectionView<'a> {
-    pub fn filtered_albums(&self) -> Vec<(usize, &'a Album)> {
-        if self.filter.is_empty() {
-            self.albums.iter().enumerate().collect()
-        } else {
-            let q = self.filter.to_lowercase();
-            self.albums
-                .iter()
-                .enumerate()
-                .filter(|(_, a)| {
-                    a.album_title.to_lowercase().contains(&q)
-                        || a.artist_name.to_lowercase().contains(&q)
-                })
-                .collect()
-        }
-    }
+    pub filtered_indices: &'a [usize],
 }
 
 impl<'a> StatefulWidget for CollectionView<'a> {
     type State = ListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
-        let filtered = self.filtered_albums();
-
-        let items: Vec<ListItem> = filtered
+        let items: Vec<ListItem> = self
+            .filtered_indices
             .iter()
-            .map(|(_, album)| {
+            .filter_map(|&i| self.albums.get(i))
+            .map(|album| {
                 let line = Line::from(vec![
                     Span::styled(&album.artist_name, theme::normal()),
                     Span::styled(" - ", theme::dim()),
@@ -49,7 +31,7 @@ impl<'a> StatefulWidget for CollectionView<'a> {
             })
             .collect();
 
-        let title = format!(" Collection ({}) ", filtered.len());
+        let title = format!(" Collection ({}) ", self.filtered_indices.len());
 
         let list = List::new(items)
             .block(

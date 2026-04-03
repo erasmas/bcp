@@ -57,6 +57,9 @@ pub struct App {
     pub collection_filter: String,
     pub album_filter: String,
     pub downloaded_filter: String,
+    pub collection_filtered_indices: Vec<usize>,
+    pub album_filtered_indices: Vec<usize>,
+    pub downloaded_filtered_indices: Vec<usize>,
     pub filter_mode: bool,
     pub status_msg: String,
     pub should_quit: bool,
@@ -92,6 +95,9 @@ impl App {
             collection_filter: String::new(),
             album_filter: String::new(),
             downloaded_filter: String::new(),
+            collection_filtered_indices: Vec::new(),
+            album_filtered_indices: Vec::new(),
+            downloaded_filtered_indices: Vec::new(),
             filter_mode: false,
             status_msg: String::new(),
             should_quit: false,
@@ -120,6 +126,7 @@ impl App {
     pub async fn load_collection(&mut self) -> Result<()> {
         if let Some(cached) = cache::load_cached_collection()? {
             self.albums = cached;
+            self.recompute_all_filters();
             self.screen = AppScreen::Main;
             if !self.albums.is_empty() {
                 self.collection_state.select(Some(0));
@@ -152,6 +159,7 @@ impl App {
         self.status_msg = "Fetching collection...".to_string();
         self.albums = client.fetch_full_collection(fan_id).await?;
         cache::save_collection_cache(&self.albums)?;
+        self.recompute_all_filters();
 
         self.screen = AppScreen::Main;
         if !self.albums.is_empty() {
@@ -176,6 +184,7 @@ impl App {
     }
 
     async fn handle_tick(&mut self) -> Result<()> {
+        // Blinking cursor in search bar needs periodic redraws
         if self.filter_mode {
             self.dirty = true;
         }
@@ -305,30 +314,79 @@ impl App {
         }
     }
 
-    /// Map a filtered list selection index back to the actual album index.
-    pub(crate) fn resolve_filtered_index(
-        &self,
-        selected: usize,
-        filter: &str,
-        library_only: bool,
-    ) -> Option<usize> {
-        let q = filter.to_lowercase();
-        let filtered: Vec<usize> = self
-            .albums
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| {
-                if library_only && !self.library.albums.contains_key(&a.item_id) {
-                    return false;
-                }
-                if filter.is_empty() {
-                    return true;
-                }
-                a.album_title.to_lowercase().contains(&q)
-                    || a.artist_name.to_lowercase().contains(&q)
-            })
-            .map(|(i, _)| i)
-            .collect();
-        filtered.get(selected).copied()
+    /// Recompute cached filtered indices for the collection view.
+    pub(crate) fn recompute_collection_filter(&mut self) {
+        if self.collection_filter.is_empty() {
+            self.collection_filtered_indices = (0..self.albums.len()).collect();
+        } else {
+            let q = self.collection_filter.to_lowercase();
+            self.collection_filtered_indices = self
+                .albums
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| {
+                    a.album_title.to_lowercase().contains(&q)
+                        || a.artist_name.to_lowercase().contains(&q)
+                })
+                .map(|(i, _)| i)
+                .collect();
+        }
+    }
+
+    /// Recompute cached filtered indices for the album track view.
+    pub(crate) fn recompute_album_filter(&mut self) {
+        let tracks = self
+            .selected_album_idx
+            .and_then(|i| self.albums.get(i))
+            .map(|a| &a.tracks[..])
+            .unwrap_or(&[]);
+
+        if self.album_filter.is_empty() {
+            self.album_filtered_indices = (0..tracks.len()).collect();
+        } else {
+            let q = self.album_filter.to_lowercase();
+            self.album_filtered_indices = tracks
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.title.to_lowercase().contains(&q))
+                .map(|(i, _)| i)
+                .collect();
+        }
+    }
+
+    /// Recompute cached filtered indices for the downloaded view.
+    pub(crate) fn recompute_downloaded_filter(&mut self) {
+        if self.downloaded_filter.is_empty() {
+            self.downloaded_filtered_indices = (0..self.albums.len()).collect();
+        } else {
+            let q = self.downloaded_filter.to_lowercase();
+            self.downloaded_filtered_indices = self
+                .albums
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| {
+                    a.album_title.to_lowercase().contains(&q)
+                        || a.artist_name.to_lowercase().contains(&q)
+                })
+                .map(|(i, _)| i)
+                .collect();
+        }
+    }
+
+    /// Recompute the cached filter for the currently active view.
+    pub(crate) fn recompute_active_filter(&mut self) {
+        match self.view {
+            View::Collection => self.recompute_collection_filter(),
+            View::Album => self.recompute_album_filter(),
+            View::Downloaded => self.recompute_downloaded_filter(),
+            View::Settings => {}
+        }
+    }
+
+    /// Recompute all cached filters (call after albums change).
+    pub(crate) fn recompute_all_filters(&mut self) {
+        self.recompute_collection_filter();
+        self.recompute_album_filter();
+        self.recompute_downloaded_filter();
     }
 }

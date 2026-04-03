@@ -87,6 +87,7 @@ impl App {
             KeyCode::Esc => {
                 if !self.active_filter().is_empty() {
                     self.active_filter_mut().clear();
+                    self.recompute_active_filter();
                 } else {
                     match self.view {
                         View::Album | View::Downloaded | View::Settings => {
@@ -145,6 +146,7 @@ impl App {
             KeyCode::Char('/') => {
                 self.filter_mode = true;
                 self.active_filter_mut().clear();
+                self.recompute_active_filter();
             }
             _ => {}
         }
@@ -156,15 +158,18 @@ impl App {
             KeyCode::Esc => {
                 self.filter_mode = false;
                 self.active_filter_mut().clear();
+                self.recompute_active_filter();
             }
             KeyCode::Enter => {
                 self.filter_mode = false;
             }
             KeyCode::Backspace => {
                 self.active_filter_mut().pop();
+                self.recompute_active_filter();
             }
             KeyCode::Char(c) => {
                 self.active_filter_mut().push(c);
+                self.recompute_active_filter();
                 match self.view {
                     View::Collection => self.collection_state.select(Some(0)),
                     View::Album => self.album_state.select(Some(0)),
@@ -179,54 +184,15 @@ impl App {
 
     fn move_selection(&mut self, delta: i32) {
         let (state, len) = match self.view {
-            View::Collection => {
-                let filtered_len = if self.collection_filter.is_empty() {
-                    self.albums.len()
-                } else {
-                    let q = self.collection_filter.to_lowercase();
-                    self.albums
-                        .iter()
-                        .filter(|a| {
-                            a.album_title.to_lowercase().contains(&q)
-                                || a.artist_name.to_lowercase().contains(&q)
-                        })
-                        .count()
-                };
-                (&mut self.collection_state, filtered_len)
-            }
-            View::Album => {
-                let len = self
-                    .selected_album_idx
-                    .and_then(|i| self.albums.get(i))
-                    .map(|a| {
-                        if self.album_filter.is_empty() {
-                            a.tracks.len()
-                        } else {
-                            let q = self.album_filter.to_lowercase();
-                            a.tracks
-                                .iter()
-                                .filter(|t| t.title.to_lowercase().contains(&q))
-                                .count()
-                        }
-                    })
-                    .unwrap_or(0);
-                (&mut self.album_state, len)
-            }
-            View::Downloaded => {
-                let filtered_len = if self.downloaded_filter.is_empty() {
-                    self.albums.len()
-                } else {
-                    let q = self.downloaded_filter.to_lowercase();
-                    self.albums
-                        .iter()
-                        .filter(|a| {
-                            a.album_title.to_lowercase().contains(&q)
-                                || a.artist_name.to_lowercase().contains(&q)
-                        })
-                        .count()
-                };
-                (&mut self.downloaded_state, filtered_len)
-            }
+            View::Collection => (
+                &mut self.collection_state,
+                self.collection_filtered_indices.len(),
+            ),
+            View::Album => (&mut self.album_state, self.album_filtered_indices.len()),
+            View::Downloaded => (
+                &mut self.downloaded_state,
+                self.downloaded_filtered_indices.len(),
+            ),
             View::Settings => return,
         };
 
@@ -254,13 +220,9 @@ impl App {
 
     fn move_to_bottom(&mut self) {
         let len = match self.view {
-            View::Collection => self.albums.len(),
-            View::Album => self
-                .selected_album_idx
-                .and_then(|i| self.albums.get(i))
-                .map(|a| a.tracks.len())
-                .unwrap_or(0),
-            View::Downloaded => self.albums.len(),
+            View::Collection => self.collection_filtered_indices.len(),
+            View::Album => self.album_filtered_indices.len(),
+            View::Downloaded => self.downloaded_filtered_indices.len(),
             View::Settings => return,
         };
         if len > 0 {
@@ -279,30 +241,14 @@ impl App {
                 let Some(selected) = self.collection_state.selected() else {
                     return Ok(());
                 };
-
-                let actual_idx = if self.collection_filter.is_empty() {
-                    selected
-                } else {
-                    let q = self.collection_filter.to_lowercase();
-                    let filtered: Vec<usize> = self
-                        .albums
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, a)| {
-                            a.album_title.to_lowercase().contains(&q)
-                                || a.artist_name.to_lowercase().contains(&q)
-                        })
-                        .map(|(i, _)| i)
-                        .collect();
-                    match filtered.get(selected) {
-                        Some(&idx) => idx,
-                        None => return Ok(()),
-                    }
+                let Some(&actual_idx) = self.collection_filtered_indices.get(selected) else {
+                    return Ok(());
                 };
 
                 self.load_album_details(actual_idx).await?;
                 self.selected_album_idx = Some(actual_idx);
                 self.album_state.select(Some(0));
+                self.recompute_album_filter();
                 self.view = View::Album;
                 self.status_msg = String::new();
             }
@@ -313,25 +259,11 @@ impl App {
                 let Some(selected) = self.album_state.selected() else {
                     return Ok(());
                 };
+                let Some(&track_idx) = self.album_filtered_indices.get(selected) else {
+                    return Ok(());
+                };
 
                 let album = &self.albums[album_idx];
-
-                let track_idx = if self.album_filter.is_empty() {
-                    selected
-                } else {
-                    let q = self.album_filter.to_lowercase();
-                    let filtered: Vec<usize> = album
-                        .tracks
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, t)| t.title.to_lowercase().contains(&q))
-                        .map(|(i, _)| i)
-                        .collect();
-                    match filtered.get(selected) {
-                        Some(&idx) => idx,
-                        None => return Ok(()),
-                    }
-                };
 
                 let items: Vec<QueueItem> = album
                     .tracks
@@ -355,15 +287,14 @@ impl App {
                 let Some(selected) = self.downloaded_state.selected() else {
                     return Ok(());
                 };
-
-                let actual_idx = match self.resolve_filtered_index(selected, &self.downloaded_filter, false) {
-                    Some(idx) => idx,
-                    None => return Ok(()),
+                let Some(&actual_idx) = self.downloaded_filtered_indices.get(selected) else {
+                    return Ok(());
                 };
 
                 self.load_album_details(actual_idx).await?;
                 self.selected_album_idx = Some(actual_idx);
                 self.album_state.select(Some(0));
+                self.recompute_album_filter();
                 self.view = View::Album;
                 self.status_msg = String::new();
             }
@@ -385,6 +316,7 @@ impl App {
                     self.albums[idx].about = detail.about;
                     self.albums[idx].credits = detail.credits;
                     self.albums[idx].release_date = detail.release_date;
+                    self.recompute_album_filter();
                 }
                 Err(e) => {
                     self.status_msg = format!("Failed to load album: {}", e);

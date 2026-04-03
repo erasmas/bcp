@@ -124,12 +124,8 @@ impl App {
 
         // Map filtered index to actual album index
         let idx = match self.view {
-            super::View::Collection => {
-                self.resolve_filtered_index(selected, &self.collection_filter, false)
-            }
-            super::View::Downloaded => {
-                self.resolve_filtered_index(selected, &self.downloaded_filter, false)
-            }
+            super::View::Collection => self.collection_filtered_indices.get(selected).copied(),
+            super::View::Downloaded => self.downloaded_filtered_indices.get(selected).copied(),
             _ => Some(selected),
         };
 
