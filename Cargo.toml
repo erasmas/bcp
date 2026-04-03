@@ -1,0 +1,23 @@
+[package]
+name = "bcp"
+version = "0.1.0"
+edition = "2024"
+description = "A terminal music player for your Bandcamp collection"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.29"
+dirs = "6"
+open = "5"
+ratatui = "0.30"
+image = "0.25"
+ratatui-image = { version = "10.0", default-features = false, features = ["crossterm", "image-defaults"] }
+reqwest = { version = "0.12", features = ["json", "cookies", "stream"] }
+rodio = { version = "0.20", features = ["symphonia-mp3"] }
+rookie = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+scraper = "0.22"
+toml = "0.8"
+tokio = { version = "1", features = ["full"] }
