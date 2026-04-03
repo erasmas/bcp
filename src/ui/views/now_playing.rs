@@ -172,13 +172,14 @@ fn render_playing(
             }
         }
 
-        // Scroll offset: manual if set, otherwise auto-scroll 1 line per 2s
+        // Scroll offset: manual if set, otherwise auto-scroll proportional to track duration
         let max_scroll = all_lines.len().saturating_sub(visible_rows);
         let scroll_offset = match meta_scroll {
             Some(manual) => manual.min(max_scroll),
             None => {
-                if all_lines.len() > visible_rows {
-                    ((elapsed / 2.0) as usize).min(max_scroll)
+                if max_scroll > 0 && duration > 0.0 {
+                    let progress = (elapsed / duration).clamp(0.0, 1.0);
+                    (progress * max_scroll as f64) as usize
                 } else {
                     0
                 }
