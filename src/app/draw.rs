@@ -11,7 +11,7 @@ use crate::ui::theme;
 use crate::ui::views::album::TrackColumn;
 use crate::ui::views::artist_column::ArtistColumn;
 use crate::ui::views::collection::AlbumColumn;
-use crate::ui::views::now_playing::NowPlayingBar;
+use crate::ui::views::now_playing::{NowPlayingBar, logo_gradient};
 use crate::ui::views::settings::SettingsView;
 
 impl App {
@@ -26,18 +26,41 @@ impl App {
     fn draw_login(&self, frame: &mut Frame) {
         let area = frame.area();
         let chunks = Layout::vertical([
-            Constraint::Percentage(30),
-            Constraint::Length(3),
-            Constraint::Length(3),
+            Constraint::Percentage(20),
+            Constraint::Length(12),
+            Constraint::Length(2),
             Constraint::Length(3),
             Constraint::Min(0),
         ])
         .split(area);
 
-        let logo = Paragraph::new(" bcp - Bandcamp Player")
-            .style(theme::title())
-            .alignment(ratatui::layout::Alignment::Center);
-        frame.render_widget(logo, chunks[1]);
+        let logo_lines = [
+            "████                                            ",
+            "████                                            ",
+            "█████████████   █████████████   █████████████",
+            "█████████████   █████████████   █████████████",
+            "████     ████   ████            ████     ████",
+            "████     ████   ████            ████     ████",
+            "█████████████   █████████████   █████████████",
+            "█████████████   █████████████   █████████████",
+            "                                ████         ",
+            "                                ████         ",
+        ];
+        let gradient = logo_gradient(logo_lines.len());
+        let logo: Vec<Line> = logo_lines
+            .iter()
+            .enumerate()
+            .map(|(i, line)| {
+                Line::from(Span::styled(
+                    *line,
+                    ratatui::style::Style::default()
+                        .fg(gradient[i % gradient.len()])
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ))
+            })
+            .collect();
+        let logo_widget = Paragraph::new(logo).alignment(ratatui::layout::Alignment::Center);
+        frame.render_widget(logo_widget, chunks[1]);
 
         let msg = match self.login_step {
             LoginStep::Prompt => "Press Enter to open Bandcamp login in your browser",
