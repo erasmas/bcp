@@ -87,7 +87,7 @@ impl<'a> Widget for SettingsView<'a> {
             let bindings = Message::all_keybindings();
             let col_width = 28u16;
             let num_cols = (table_area.width / col_width).max(1) as usize;
-            let num_rows = (bindings.len() + num_cols - 1) / num_cols;
+            let num_rows = bindings.len().div_ceil(num_cols);
 
             let rows: Vec<Row> = (0..num_rows)
                 .map(|row| {

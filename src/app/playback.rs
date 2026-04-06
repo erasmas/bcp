@@ -68,32 +68,32 @@ impl App {
         self.art_rx = Some(art_rx);
         tokio::spawn(async move {
             // Check local cover first
-            if crate::library::has_cover(&artist_name, &album_title) {
-                if let Ok(base) = crate::config::library_dir() {
-                    let path = base
-                        .join(crate::library::sanitize_for_path(&artist_name))
-                        .join(crate::library::sanitize_for_path(&album_title))
-                        .join("cover.jpg");
-                    if let Ok(img) = image::open(&path) {
-                        let _ = art_tx.send(Some(img));
-                        return;
-                    }
+            if crate::library::has_cover(&artist_name, &album_title)
+                && let Ok(base) = crate::config::library_dir()
+            {
+                let path = base
+                    .join(crate::library::sanitize_for_path(&artist_name))
+                    .join(crate::library::sanitize_for_path(&album_title))
+                    .join("cover.jpg");
+                if let Ok(img) = image::open(&path) {
+                    let _ = art_tx.send(Some(img));
+                    return;
                 }
             }
             // Fall back to network and save locally
-            if let Some(ref art) = art_url {
-                if let Ok(_) = crate::library::download_cover(&artist_name, &album_title, art).await
-                {
-                    if let Ok(base) = crate::config::library_dir() {
-                        let path = base
-                            .join(crate::library::sanitize_for_path(&artist_name))
-                            .join(crate::library::sanitize_for_path(&album_title))
-                            .join("cover.jpg");
-                        if let Ok(img) = image::open(&path) {
-                            let _ = art_tx.send(Some(img));
-                            return;
-                        }
-                    }
+            if let Some(ref art) = art_url
+                && crate::library::download_cover(&artist_name, &album_title, art)
+                    .await
+                    .is_ok()
+                && let Ok(base) = crate::config::library_dir()
+            {
+                let path = base
+                    .join(crate::library::sanitize_for_path(&artist_name))
+                    .join(crate::library::sanitize_for_path(&album_title))
+                    .join("cover.jpg");
+                if let Ok(img) = image::open(&path) {
+                    let _ = art_tx.send(Some(img));
+                    return;
                 }
             }
             let _ = art_tx.send(None);
@@ -292,9 +292,10 @@ impl App {
             .unwrap_or("");
 
         // Ensure album entry exists in library
-        if !self.library.albums.contains_key(&album.item_id) {
-            let entry = library::prepare_album_entry(album);
-            self.library.albums.insert(album.item_id, entry);
+        if let std::collections::hash_map::Entry::Vacant(e) =
+            self.library.albums.entry(album.item_id)
+        {
+            e.insert(library::prepare_album_entry(album));
             let _ = self.library.save();
         }
 

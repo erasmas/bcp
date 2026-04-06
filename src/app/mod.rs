@@ -61,7 +61,7 @@ impl ArtistIndex {
         }
 
         let mut artists: Vec<String> = seen.into_values().collect();
-        artists.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+        artists.sort_by_key(|a| a.to_lowercase());
 
         ArtistIndex {
             artists,
@@ -282,13 +282,13 @@ impl App {
         }
 
         // Album detail fetch (single)
-        if let Some((idx, ref mut rx)) = self.tracks_rx {
-            if let Ok(result) = rx.try_recv() {
-                self.tracks_rx = None;
-                match result {
-                    Ok(detail) => messages.push(Message::AlbumDetailLoaded { idx, detail }),
-                    Err(e) => messages.push(Message::AlbumDetailFailed(e.to_string())),
-                }
+        if let Some((idx, ref mut rx)) = self.tracks_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.tracks_rx = None;
+            match result {
+                Ok(detail) => messages.push(Message::AlbumDetailLoaded { idx, detail }),
+                Err(e) => messages.push(Message::AlbumDetailFailed(e.to_string())),
             }
         }
 
@@ -313,23 +313,23 @@ impl App {
         }
 
         // MP3 download
-        if let Some(ref mut rx) = self.mp3_rx {
-            if let Ok(result) = rx.try_recv() {
-                self.mp3_rx = None;
-                match result {
-                    Ok(data) => messages.push(Message::Mp3Ready(data)),
-                    Err(e) => messages.push(Message::Mp3Failed(e.to_string())),
-                }
+        if let Some(ref mut rx) = self.mp3_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.mp3_rx = None;
+            match result {
+                Ok(data) => messages.push(Message::Mp3Ready(data)),
+                Err(e) => messages.push(Message::Mp3Failed(e.to_string())),
             }
         }
 
         // Art download
-        if let Some(ref mut rx) = self.art_rx {
-            if let Ok(result) = rx.try_recv() {
-                self.art_rx = None;
-                if let Some(img) = result {
-                    messages.push(Message::ArtReady(img));
-                }
+        if let Some(ref mut rx) = self.art_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.art_rx = None;
+            if let Some(img) = result {
+                messages.push(Message::ArtReady(img));
             }
         }
 
