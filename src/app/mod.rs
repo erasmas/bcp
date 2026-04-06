@@ -1,14 +1,18 @@
 mod draw;
 mod input;
 mod playback;
+mod update;
+
+pub use update::Message;
 
 use anyhow::Result;
 use ratatui::widgets::ListState;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
+use std::collections::HashMap;
 use std::time::Instant;
 
-use crate::bandcamp::client::BandcampClient;
+use crate::bandcamp::client::{AlbumDetail, BandcampClient};
 use crate::bandcamp::models::{Album, AuthData, Track};
 use crate::events::AppEvent;
 use crate::library::{self, DownloadEvent, LibraryIndex};
@@ -17,11 +21,10 @@ use crate::player::queue::PlayQueue;
 use crate::{auth, cache};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum View {
-    Collection,
-    Album,
-    Downloaded,
-    Settings,
+pub enum Column {
+    Artists,
+    Albums,
+    Tracks,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,14 +41,58 @@ pub enum LoginStep {
     Extracting,
 }
 
+pub struct ArtistIndex {
+    /// Sorted, deduplicated artist names (display casing)
+    pub artists: Vec<String>,
+    /// Map from lowercase artist name -> indices into App::albums
+    pub albums_by_artist: HashMap<String, Vec<usize>>,
+}
+
+impl ArtistIndex {
+    pub fn build(albums: &[Album]) -> Self {
+        let mut seen: HashMap<String, String> = HashMap::new();
+        let mut albums_by_artist: HashMap<String, Vec<usize>> = HashMap::new();
+
+        for (i, album) in albums.iter().enumerate() {
+            let key = album.artist_name.to_lowercase();
+            seen.entry(key.clone())
+                .or_insert_with(|| album.artist_name.clone());
+            albums_by_artist.entry(key).or_default().push(i);
+        }
+
+        let mut artists: Vec<String> = seen.into_values().collect();
+        artists.sort_by_key(|a| a.to_lowercase());
+
+        ArtistIndex {
+            artists,
+            albums_by_artist,
+        }
+    }
+
+    /// Get album indices for the artist at the given index in the sorted artists list.
+    pub fn albums_for(&self, artist_idx: usize) -> &[usize] {
+        if let Some(name) = self.artists.get(artist_idx) {
+            let key = name.to_lowercase();
+            self.albums_by_artist
+                .get(&key)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[])
+        } else {
+            &[]
+        }
+    }
+}
+
 pub struct App {
     pub screen: AppScreen,
-    pub view: View,
+    pub focus: Column,
+    pub show_settings: bool,
     pub albums: Vec<Album>,
+    pub artist_index: ArtistIndex,
     pub queue: PlayQueue,
-    pub collection_state: ListState,
+    pub artist_state: ListState,
     pub album_state: ListState,
-    pub downloaded_state: ListState,
+    pub track_state: ListState,
     pub library: LibraryIndex,
     pub download_rx: Vec<tokio::sync::mpsc::UnboundedReceiver<DownloadEvent>>,
     pub selected_album_idx: Option<usize>,
@@ -54,12 +101,11 @@ pub struct App {
     pub elapsed: f64,
     pub play_started: Option<Instant>,
     pub pause_accumulated: f64,
-    pub collection_filter: String,
-    pub album_filter: String,
-    pub downloaded_filter: String,
-    pub collection_filtered_indices: Vec<usize>,
-    pub album_filtered_indices: Vec<usize>,
-    pub downloaded_filtered_indices: Vec<usize>,
+    pub filter_text: String,
+    pub artist_filtered: Vec<usize>,
+    pub album_filtered: Vec<usize>,
+    pub track_filtered: Vec<usize>,
+    pub loading_tracks: bool,
     pub filter_mode: bool,
     pub status_msg: String,
     pub should_quit: bool,
@@ -68,6 +114,10 @@ pub struct App {
     pub login_step: LoginStep,
     pub art_protocol: Option<StatefulProtocol>,
     pub art_picker: Option<Picker>,
+    pub(crate) tracks_rx: Option<(usize, tokio::sync::oneshot::Receiver<Result<AlbumDetail>>)>,
+    pub(crate) detail_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(usize, AlbumDetail)>>,
+    pub(crate) prefetch_total: usize,
+    pub(crate) prefetch_done: usize,
     pub(crate) mp3_rx: Option<tokio::sync::oneshot::Receiver<Result<Vec<u8>>>>,
     pub(crate) art_rx: Option<tokio::sync::oneshot::Receiver<Option<image::DynamicImage>>>,
     pub(crate) engine: Option<AudioEngine>,
@@ -78,12 +128,17 @@ impl App {
     pub fn new() -> Self {
         Self {
             screen: AppScreen::Login,
-            view: View::Collection,
+            focus: Column::Artists,
+            show_settings: false,
             albums: Vec::new(),
+            artist_index: ArtistIndex {
+                artists: Vec::new(),
+                albums_by_artist: HashMap::new(),
+            },
             queue: PlayQueue::new(),
-            collection_state: ListState::default(),
+            artist_state: ListState::default(),
             album_state: ListState::default(),
-            downloaded_state: ListState::default(),
+            track_state: ListState::default(),
             library: LibraryIndex::load().unwrap_or_else(|_| LibraryIndex::new()),
             download_rx: Vec::new(),
             selected_album_idx: None,
@@ -92,12 +147,11 @@ impl App {
             elapsed: 0.0,
             play_started: None,
             pause_accumulated: 0.0,
-            collection_filter: String::new(),
-            album_filter: String::new(),
-            downloaded_filter: String::new(),
-            collection_filtered_indices: Vec::new(),
-            album_filtered_indices: Vec::new(),
-            downloaded_filtered_indices: Vec::new(),
+            filter_text: String::new(),
+            artist_filtered: Vec::new(),
+            album_filtered: Vec::new(),
+            track_filtered: Vec::new(),
+            loading_tracks: false,
             filter_mode: false,
             status_msg: String::new(),
             should_quit: false,
@@ -106,6 +160,10 @@ impl App {
             login_step: LoginStep::Prompt,
             art_protocol: None,
             art_picker: Picker::from_query_stdio().ok(),
+            tracks_rx: None,
+            detail_rx: None,
+            prefetch_total: 0,
+            prefetch_done: 0,
             mp3_rx: None,
             art_rx: None,
             engine: None,
@@ -126,12 +184,16 @@ impl App {
     pub async fn load_collection(&mut self) -> Result<()> {
         if let Some(cached) = cache::load_cached_collection()? {
             self.albums = cached;
-            self.recompute_all_filters();
+            self.rebuild_artist_index();
             self.screen = AppScreen::Main;
-            if !self.albums.is_empty() {
-                self.collection_state.select(Some(0));
+            if !self.artist_index.artists.is_empty() {
+                self.artist_state.select(Some(0));
+                self.on_artist_changed();
             }
-            self.status_msg = format!("Loaded {} albums from cache", self.albums.len());
+            self.hydrate_library_tracks();
+            if self.detail_rx.is_none() {
+                self.status_msg = format!("Loaded {} albums from cache", self.albums.len());
+            }
             return Ok(());
         }
 
@@ -159,32 +221,38 @@ impl App {
         self.status_msg = "Fetching collection...".to_string();
         self.albums = client.fetch_full_collection(fan_id).await?;
         cache::save_collection_cache(&self.albums)?;
-        self.recompute_all_filters();
+        self.rebuild_artist_index();
 
         self.screen = AppScreen::Main;
-        if !self.albums.is_empty() {
-            self.collection_state.select(Some(0));
+        if !self.artist_index.artists.is_empty() {
+            self.artist_state.select(Some(0));
+            self.on_artist_changed();
         }
-        self.status_msg = format!("Loaded {} albums", self.albums.len());
+        self.hydrate_library_tracks();
+        if self.detail_rx.is_none() {
+            self.status_msg = format!("Loaded {} albums", self.albums.len());
+        }
         Ok(())
     }
 
     pub async fn handle_event(&mut self, event: AppEvent) -> Result<()> {
         match event {
             AppEvent::Key(key) => {
-                self.handle_key(key).await?;
+                if let Some(msg) = self.map_key(key) {
+                    self.update(msg).await?;
+                }
                 self.dirty = true;
             }
             AppEvent::Resize => {
                 self.dirty = true;
             }
-            AppEvent::Tick => self.handle_tick().await?,
+            AppEvent::Tick => self.poll_async_results().await?,
         }
         Ok(())
     }
 
-    async fn handle_tick(&mut self) -> Result<()> {
-        // Blinking cursor in search bar needs periodic redraws
+    /// Poll all async channels and dispatch results as Messages.
+    async fn poll_async_results(&mut self) -> Result<()> {
         if self.filter_mode {
             self.dirty = true;
         }
@@ -199,91 +267,86 @@ impl App {
             }
         }
 
-        // Check for player events
-        let mut track_finished = false;
+        // Collect messages from channels
+        let mut messages = Vec::new();
+
+        // Player events
         if let Some(ref mut engine) = self.engine {
             while let Ok(event) = engine.event_rx.try_recv() {
                 match event {
-                    PlayerEvent::Finished => track_finished = true,
-                    PlayerEvent::Error(e) => {
-                        self.status_msg = format!("Playback error: {}", e);
-                        self.dirty = true;
-                    }
+                    PlayerEvent::Finished => messages.push(Message::TrackFinished),
+                    PlayerEvent::Error(e) => messages.push(Message::PlaybackError(e)),
                     _ => {}
                 }
             }
         }
-        if track_finished {
-            self.play_next();
+
+        // Album detail fetch (single)
+        if let Some((idx, ref mut rx)) = self.tracks_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.tracks_rx = None;
+            match result {
+                Ok(detail) => messages.push(Message::AlbumDetailLoaded { idx, detail }),
+                Err(e) => messages.push(Message::AlbumDetailFailed(e.to_string())),
+            }
         }
 
-        // Check for MP3 download result
+        // Background prefetch
+        if let Some(ref mut rx) = self.detail_rx {
+            let mut done = false;
+            loop {
+                match rx.try_recv() {
+                    Ok((idx, detail)) => {
+                        messages.push(Message::PrefetchResult { idx, detail });
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        done = true;
+                        break;
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                }
+            }
+            if done {
+                messages.push(Message::PrefetchDone);
+            }
+        }
+
+        // MP3 download
         if let Some(ref mut rx) = self.mp3_rx
             && let Ok(result) = rx.try_recv()
         {
             self.mp3_rx = None;
             match result {
-                Ok(data) => {
-                    if let Some(ref engine) = self.engine {
-                        engine.play(data)?;
-                        self.is_paused = false;
-                        self.play_started = Some(Instant::now());
-                        self.pause_accumulated = 0.0;
-                        self.elapsed = 0.0;
-                        self.meta_scroll = None;
-                        self.status_msg = String::new();
-                        self.dirty = true;
-                    }
-                }
-                Err(e) => {
-                    self.status_msg = format!("Stream error: {}", e);
-                    self.dirty = true;
-                }
+                Ok(data) => messages.push(Message::Mp3Ready(data)),
+                Err(e) => messages.push(Message::Mp3Failed(e.to_string())),
             }
         }
 
-        // Check for art download result
+        // Art download
         if let Some(ref mut rx) = self.art_rx
             && let Ok(result) = rx.try_recv()
         {
             self.art_rx = None;
-            if let Some(img) = result
-                && let Some(ref mut picker) = self.art_picker
-            {
-                self.art_protocol = Some(picker.new_resize_protocol(img));
-                self.dirty = true;
+            if let Some(img) = result {
+                messages.push(Message::ArtReady(img));
             }
         }
 
-        // Poll download progress
+        // Download progress
         let mut completed_indices = Vec::new();
         for (i, rx) in self.download_rx.iter_mut().enumerate() {
             while let Ok(event) = rx.try_recv() {
                 match event {
                     DownloadEvent::TrackDone { item_id, track_num } => {
-                        if let Some(album) = self.library.albums.get_mut(&item_id)
-                            && let Some(track) =
-                                album.tracks.iter_mut().find(|t| t.track_num == track_num)
-                        {
-                            track.downloaded = true;
-                        }
-                        self.dirty = true;
+                        messages.push(Message::DownloadTrackDone { item_id, track_num });
                     }
                     DownloadEvent::AlbumDone { item_id } => {
-                        if let Some(album) = self.library.albums.get_mut(&item_id) {
-                            album.status = library::AlbumDownloadStatus::Complete;
-                            self.status_msg = format!(
-                                "Downloaded: {} - {}",
-                                album.artist_name, album.album_title
-                            );
-                        }
-                        let _ = self.library.save();
+                        messages.push(Message::DownloadAlbumDone { item_id });
                         completed_indices.push(i);
-                        self.dirty = true;
                     }
                     DownloadEvent::Error { item_id, msg } => {
-                        self.status_msg = format!("Download error ({}): {}", item_id, msg);
-                        self.dirty = true;
+                        messages.push(Message::DownloadError { item_id, msg });
                     }
                 }
             }
@@ -292,59 +355,257 @@ impl App {
             self.download_rx.remove(i);
         }
 
+        // Process all collected messages
+        for msg in messages {
+            self.update(msg).await?;
+        }
+
         Ok(())
     }
 
-    pub(crate) fn active_filter(&self) -> &str {
-        match self.view {
-            View::Collection => &self.collection_filter,
-            View::Album => &self.album_filter,
-            View::Downloaded => &self.downloaded_filter,
-            _ => "",
-        }
+    // -- Artist index --
+
+    pub(crate) fn rebuild_artist_index(&mut self) {
+        self.artist_index = ArtistIndex::build(&self.albums);
+        self.recompute_artist_filter();
     }
 
-    pub(crate) fn active_filter_mut(&mut self) -> &mut String {
-        match self.view {
-            View::Collection => &mut self.collection_filter,
-            View::Album => &mut self.album_filter,
-            View::Downloaded => &mut self.downloaded_filter,
-            _ => &mut self.collection_filter,
+    /// Populate tracks from local metadata files and library, then prefetch
+    /// track metadata from the API for all remaining albums in the background.
+    pub(crate) fn hydrate_library_tracks(&mut self) {
+        // Populate tracks from metadata.json or library data
+        for album in self.albums.iter_mut() {
+            if !album.tracks.is_empty() {
+                continue;
+            }
+            // Try metadata.json first
+            if let Some(meta) = library::load_album_metadata(&album.artist_name, &album.album_title)
+            {
+                album.tracks = meta
+                    .tracks
+                    .iter()
+                    .map(|t| Track {
+                        title: t.title.clone(),
+                        track_num: t.track_num,
+                        duration: t.duration,
+                        stream_url: t.stream_url.clone(),
+                    })
+                    .collect();
+                album.about = meta.about;
+                album.credits = meta.credits;
+                album.release_date = meta.release_date;
+                continue;
+            }
+            // Fall back to library index
+            if let Some(dl) = self.library.albums.get(&album.item_id) {
+                album.tracks = dl
+                    .tracks
+                    .iter()
+                    .map(|t| Track {
+                        title: t.title.clone(),
+                        track_num: t.track_num,
+                        duration: t.duration,
+                        stream_url: None,
+                    })
+                    .collect();
+            }
         }
+
+        // Download missing covers in the background
+        let needs_covers: Vec<(String, String, String)> = self
+            .albums
+            .iter()
+            .filter(|a| a.art_url.is_some() && !library::has_cover(&a.artist_name, &a.album_title))
+            .map(|a| {
+                (
+                    a.artist_name.clone(),
+                    a.album_title.clone(),
+                    a.art_url.clone().unwrap(),
+                )
+            })
+            .collect();
+
+        if !needs_covers.is_empty() {
+            tokio::spawn(async move {
+                for (artist, album_title, art_url) in needs_covers {
+                    let _ = library::download_cover(&artist, &album_title, &art_url).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+            });
+        }
+
+        // Prefetch track data for all albums that still have empty tracks
+        let needs_fetch: Vec<(usize, String, String, String, Option<String>)> = self
+            .albums
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.tracks.is_empty() && !a.item_url.is_empty())
+            .map(|(i, a)| {
+                (
+                    i,
+                    a.item_url.clone(),
+                    a.artist_name.clone(),
+                    a.album_title.clone(),
+                    a.art_url.clone(),
+                )
+            })
+            .collect();
+
+        if needs_fetch.is_empty() {
+            return;
+        }
+
+        let Some(ref client) = self.client else {
+            return;
+        };
+
+        let http = client.clone_http();
+        let cookie = client.cookie_header();
+        self.prefetch_total = needs_fetch.len();
+        self.prefetch_done = 0;
+        self.status_msg = format!("syncing album metadata (0/{})...", self.prefetch_total);
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.detail_rx = Some(rx);
+
+        tokio::spawn(async move {
+            for (idx, url, artist, album_title, art_url) in needs_fetch {
+                if let Ok(detail) =
+                    crate::bandcamp::client::BandcampClient::fetch_album_details_static(
+                        &http, &cookie, &url,
+                    )
+                    .await
+                {
+                    // Download cover art
+                    if let Some(ref art) = art_url {
+                        let _ = library::download_cover(&artist, &album_title, art).await;
+                    }
+
+                    if tx.send((idx, detail)).is_err() {
+                        break;
+                    }
+                }
+                // Rate limit to avoid overwhelming the Bandcamp API
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        });
     }
 
-    /// Recompute cached filtered indices for the collection view.
-    pub(crate) fn recompute_collection_filter(&mut self) {
-        if self.collection_filter.is_empty() {
-            self.collection_filtered_indices = (0..self.albums.len()).collect();
+    // -- Selection cascade --
+
+    pub(crate) fn on_artist_changed(&mut self) {
+        self.recompute_album_filter();
+        if !self.album_filtered.is_empty() {
+            self.album_state.select(Some(0));
         } else {
-            let q = self.collection_filter.to_lowercase();
-            self.collection_filtered_indices = self
-                .albums
+            self.album_state.select(None);
+        }
+        self.on_album_changed();
+    }
+
+    pub(crate) fn on_album_changed(&mut self) {
+        // Determine selected album index in the global albums vec
+        if self.artist_state.selected().is_some() {
+            let artist_albums = self.current_artist_album_indices();
+            if let Some(&filtered_idx) = self
+                .album_filtered
+                .get(self.album_state.selected().unwrap_or(0))
+            {
+                if let Some(&album_idx) = artist_albums.get(filtered_idx) {
+                    self.selected_album_idx = Some(album_idx);
+                } else {
+                    self.selected_album_idx = None;
+                }
+            } else {
+                self.selected_album_idx = None;
+            }
+        } else {
+            self.selected_album_idx = None;
+        }
+        self.recompute_track_filter();
+        if !self.track_filtered.is_empty() {
+            self.track_state.select(Some(0));
+        } else {
+            self.track_state.select(None);
+        }
+    }
+
+    /// Get the album indices (into self.albums) for the currently selected artist.
+    pub(crate) fn current_artist_album_indices(&self) -> Vec<usize> {
+        let Some(selected) = self.artist_state.selected() else {
+            return Vec::new();
+        };
+        let Some(&filtered_artist) = self.artist_filtered.get(selected) else {
+            return Vec::new();
+        };
+        self.artist_index.albums_for(filtered_artist).to_vec()
+    }
+
+    /// Get the selected artist name for display.
+    pub(crate) fn selected_artist_name(&self) -> Option<&str> {
+        let selected = self.artist_state.selected()?;
+        let &filtered_idx = self.artist_filtered.get(selected)?;
+        self.artist_index
+            .artists
+            .get(filtered_idx)
+            .map(|s| s.as_str())
+    }
+
+    /// Get the selected album for display.
+    pub(crate) fn selected_album(&self) -> Option<&Album> {
+        self.selected_album_idx.and_then(|i| self.albums.get(i))
+    }
+
+    // -- Filters --
+
+    pub(crate) fn recompute_artist_filter(&mut self) {
+        if self.filter_text.is_empty() || self.focus != Column::Artists {
+            self.artist_filtered = (0..self.artist_index.artists.len()).collect();
+        } else {
+            let q = self.filter_text.to_lowercase();
+            self.artist_filtered = self
+                .artist_index
+                .artists
                 .iter()
                 .enumerate()
-                .filter(|(_, a)| {
-                    a.album_title.to_lowercase().contains(&q)
-                        || a.artist_name.to_lowercase().contains(&q)
+                .filter(|(_, name)| name.to_lowercase().contains(&q))
+                .map(|(i, _)| i)
+                .collect();
+        }
+    }
+
+    pub(crate) fn recompute_album_filter(&mut self) {
+        let artist_albums = self.current_artist_album_indices();
+        if self.filter_text.is_empty() || self.focus != Column::Albums {
+            self.album_filtered = (0..artist_albums.len()).collect();
+        } else {
+            let q = self.filter_text.to_lowercase();
+            self.album_filtered = artist_albums
+                .iter()
+                .enumerate()
+                .filter(|(_, album_idx)| {
+                    let album_idx = **album_idx;
+                    self.albums
+                        .get(album_idx)
+                        .is_some_and(|a| a.album_title.to_lowercase().contains(&q))
                 })
                 .map(|(i, _)| i)
                 .collect();
         }
     }
 
-    /// Recompute cached filtered indices for the album track view.
-    pub(crate) fn recompute_album_filter(&mut self) {
+    pub(crate) fn recompute_track_filter(&mut self) {
         let tracks = self
             .selected_album_idx
             .and_then(|i| self.albums.get(i))
             .map(|a| &a.tracks[..])
             .unwrap_or(&[]);
 
-        if self.album_filter.is_empty() {
-            self.album_filtered_indices = (0..tracks.len()).collect();
+        if self.filter_text.is_empty() || self.focus != Column::Tracks {
+            self.track_filtered = (0..tracks.len()).collect();
         } else {
-            let q = self.album_filter.to_lowercase();
-            self.album_filtered_indices = tracks
+            let q = self.filter_text.to_lowercase();
+            self.track_filtered = tracks
                 .iter()
                 .enumerate()
                 .filter(|(_, t)| t.title.to_lowercase().contains(&q))
@@ -353,40 +614,18 @@ impl App {
         }
     }
 
-    /// Recompute cached filtered indices for the downloaded view.
-    pub(crate) fn recompute_downloaded_filter(&mut self) {
-        if self.downloaded_filter.is_empty() {
-            self.downloaded_filtered_indices = (0..self.albums.len()).collect();
-        } else {
-            let q = self.downloaded_filter.to_lowercase();
-            self.downloaded_filtered_indices = self
-                .albums
-                .iter()
-                .enumerate()
-                .filter(|(_, a)| {
-                    a.album_title.to_lowercase().contains(&q)
-                        || a.artist_name.to_lowercase().contains(&q)
-                })
-                .map(|(i, _)| i)
-                .collect();
-        }
-    }
-
-    /// Recompute the cached filter for the currently active view.
     pub(crate) fn recompute_active_filter(&mut self) {
-        match self.view {
-            View::Collection => self.recompute_collection_filter(),
-            View::Album => self.recompute_album_filter(),
-            View::Downloaded => self.recompute_downloaded_filter(),
-            View::Settings => {}
+        match self.focus {
+            Column::Artists => {
+                self.recompute_artist_filter();
+                self.on_artist_changed();
+            }
+            Column::Albums => {
+                self.recompute_album_filter();
+                self.on_album_changed();
+            }
+            Column::Tracks => self.recompute_track_filter(),
         }
-    }
-
-    /// Recompute all cached filters (call after albums change).
-    pub(crate) fn recompute_all_filters(&mut self) {
-        self.recompute_collection_filter();
-        self.recompute_album_filter();
-        self.recompute_downloaded_filter();
     }
 
     /// Populate albums list from the library index for offline mode.
@@ -401,7 +640,7 @@ impl App {
                 .map(|t| Track {
                     title: t.title.clone(),
                     track_num: t.track_num,
-                    duration: 0.0,
+                    duration: t.duration,
                     stream_url: None,
                 })
                 .collect();

@@ -1,10 +1,11 @@
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Constraint, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{Block, Borders, Paragraph, Row, Table, Widget},
 };
 
+use crate::app::Message;
 use crate::config;
 use crate::ui::theme;
 
@@ -26,7 +27,17 @@ impl<'a> Widget for SettingsView<'a> {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "unknown".to_string());
 
-        let lines = vec![
+        let block = Block::default()
+            .title(" Info ")
+            .title_style(theme::title())
+            .borders(Borders::ALL)
+            .border_style(theme::dim());
+
+        let inner = block.inner(area);
+        block.render(area, buf);
+
+        // Info section
+        let info_lines = vec![
             Line::from(""),
             Line::from(vec![
                 Span::styled("  Account:      ", theme::dim()),
@@ -58,43 +69,46 @@ impl<'a> Widget for SettingsView<'a> {
             Line::from(""),
             Line::from(Span::styled("  Keybindings", theme::selected())),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("  j/k ", theme::normal()),
-                Span::styled("navigate  ", theme::dim()),
-                Span::styled("Enter ", theme::normal()),
-                Span::styled("open/play  ", theme::dim()),
-                Span::styled("Space ", theme::normal()),
-                Span::styled("pause  ", theme::dim()),
-            ]),
-            Line::from(vec![
-                Span::styled("  n/p ", theme::normal()),
-                Span::styled("next/prev  ", theme::dim()),
-                Span::styled("/ ", theme::normal()),
-                Span::styled("search  ", theme::dim()),
-                Span::styled("Esc ", theme::normal()),
-                Span::styled("back/clear  ", theme::dim()),
-            ]),
-            Line::from(vec![
-                Span::styled("  d ", theme::normal()),
-                Span::styled("download album  ", theme::dim()),
-                Span::styled("D ", theme::normal()),
-                Span::styled("download all  ", theme::dim()),
-                Span::styled("r ", theme::normal()),
-                Span::styled("refresh  ", theme::dim()),
-            ]),
-            Line::from(vec![
-                Span::styled("  q ", theme::normal()),
-                Span::styled("quit", theme::dim()),
-            ]),
         ];
 
-        let block = Block::default()
-            .title(" Info ")
-            .title_style(theme::title())
-            .borders(Borders::ALL)
-            .border_style(theme::dim());
+        let info_height = info_lines.len() as u16;
+        let info_area = Rect::new(inner.x, inner.y, inner.width, info_height.min(inner.height));
+        Paragraph::new(info_lines).render(info_area, buf);
 
-        let paragraph = Paragraph::new(lines).block(block);
-        paragraph.render(area, buf);
+        // Keybindings table
+        if inner.height > info_height {
+            let table_area = Rect::new(
+                inner.x + 2,
+                inner.y + info_height,
+                inner.width.saturating_sub(4),
+                inner.height - info_height,
+            );
+
+            let bindings = Message::all_keybindings();
+            let col_width = 28u16;
+            let num_cols = (table_area.width / col_width).max(1) as usize;
+            let num_rows = bindings.len().div_ceil(num_cols);
+
+            let rows: Vec<Row> = (0..num_rows)
+                .map(|row| {
+                    let mut cells = Vec::new();
+                    for col in 0..num_cols {
+                        let idx = col * num_rows + row;
+                        if let Some((key, desc)) = bindings.get(idx) {
+                            cells.push(Span::styled(*key, theme::normal()));
+                            cells.push(Span::styled(*desc, theme::dim()));
+                        }
+                    }
+                    Row::new(cells)
+                })
+                .collect();
+
+            let widths: Vec<Constraint> = (0..num_cols)
+                .flat_map(|_| [Constraint::Length(8), Constraint::Length(col_width - 8)])
+                .collect();
+
+            let table = Table::new(rows, widths);
+            Widget::render(table, table_area, buf);
+        }
     }
 }

@@ -131,12 +131,13 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
             // Fall back to offline mode if we have downloaded albums
             if !app.library.albums.is_empty() {
                 app.load_albums_from_library();
-                app.recompute_all_filters();
+                app.rebuild_artist_index();
                 app.screen = app::AppScreen::Main;
-                if !app.albums.is_empty() {
-                    app.collection_state.select(Some(0));
+                if !app.artist_index.artists.is_empty() {
+                    app.artist_state.select(Some(0));
+                    app.on_artist_changed();
                 }
-                app.view = app::View::Downloaded;
+
                 app.status_msg = format!(
                     "Offline mode ({} downloaded albums)",
                     app.library.albums.len()
@@ -164,12 +165,13 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                 if let Err(e) = app.load_collection().await {
                     if !app.library.albums.is_empty() {
                         app.load_albums_from_library();
-                        app.recompute_all_filters();
+                        app.rebuild_artist_index();
                         app.screen = app::AppScreen::Main;
-                        if !app.albums.is_empty() {
-                            app.collection_state.select(Some(0));
+                        if !app.artist_index.artists.is_empty() {
+                            app.artist_state.select(Some(0));
+                            app.on_artist_changed();
                         }
-                        app.view = app::View::Downloaded;
+
                         app.status_msg = format!(
                             "Offline mode ({} downloaded albums)",
                             app.library.albums.len()

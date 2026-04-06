@@ -1,15 +1,17 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
+    text::{Line, Span},
+    widgets::{Clear, Paragraph},
 };
 use ratatui_image::StatefulImage;
 
-use super::{App, AppScreen, LoginStep, View};
+use super::{App, AppScreen, Column, LoginStep};
 use crate::ui::theme;
-use crate::ui::views::album::AlbumView;
-use crate::ui::views::collection::CollectionView;
-use crate::ui::views::downloaded::DownloadedView;
-use crate::ui::views::now_playing::NowPlayingBar;
+use crate::ui::views::album::TrackColumn;
+use crate::ui::views::artist_column::ArtistColumn;
+use crate::ui::views::collection::AlbumColumn;
+use crate::ui::views::now_playing::{NowPlayingBar, logo_gradient};
 use crate::ui::views::settings::SettingsView;
 
 impl App {
@@ -24,18 +26,41 @@ impl App {
     fn draw_login(&self, frame: &mut Frame) {
         let area = frame.area();
         let chunks = Layout::vertical([
-            Constraint::Percentage(30),
-            Constraint::Length(3),
-            Constraint::Length(3),
+            Constraint::Percentage(20),
+            Constraint::Length(12),
+            Constraint::Length(2),
             Constraint::Length(3),
             Constraint::Min(0),
         ])
         .split(area);
 
-        let logo = ratatui::widgets::Paragraph::new(" bcp - Bandcamp Player")
-            .style(theme::title())
-            .alignment(ratatui::layout::Alignment::Center);
-        frame.render_widget(logo, chunks[1]);
+        let logo_lines = [
+            "████                                            ",
+            "████                                            ",
+            "█████████████   █████████████   █████████████",
+            "█████████████   █████████████   █████████████",
+            "████     ████   ████            ████     ████",
+            "████     ████   ████            ████     ████",
+            "█████████████   █████████████   █████████████",
+            "█████████████   █████████████   █████████████",
+            "                                ████         ",
+            "                                ████         ",
+        ];
+        let gradient = logo_gradient(logo_lines.len());
+        let logo: Vec<Line> = logo_lines
+            .iter()
+            .enumerate()
+            .map(|(i, line)| {
+                Line::from(Span::styled(
+                    *line,
+                    ratatui::style::Style::default()
+                        .fg(gradient[i % gradient.len()])
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ))
+            })
+            .collect();
+        let logo_widget = Paragraph::new(logo).alignment(ratatui::layout::Alignment::Center);
+        frame.render_widget(logo_widget, chunks[1]);
 
         let msg = match self.login_step {
             LoginStep::Prompt => "Press Enter to open Bandcamp login in your browser",
@@ -44,13 +69,13 @@ impl App {
             }
             LoginStep::Extracting => "Extracting session cookie...",
         };
-        let prompt = ratatui::widgets::Paragraph::new(msg)
+        let prompt = Paragraph::new(msg)
             .style(theme::normal())
             .alignment(ratatui::layout::Alignment::Center);
         frame.render_widget(prompt, chunks[2]);
 
         if !self.status_msg.is_empty() {
-            let status = ratatui::widgets::Paragraph::new(self.status_msg.as_str())
+            let status = Paragraph::new(self.status_msg.as_str())
                 .style(theme::dim())
                 .alignment(ratatui::layout::Alignment::Center);
             frame.render_widget(status, chunks[3]);
@@ -66,7 +91,7 @@ impl App {
         ])
         .split(area);
 
-        let msg = ratatui::widgets::Paragraph::new(self.status_msg.as_str())
+        let msg = Paragraph::new(self.status_msg.as_str())
             .style(theme::normal())
             .alignment(ratatui::layout::Alignment::Center);
         frame.render_widget(msg, chunks[1]);
@@ -102,57 +127,48 @@ impl App {
             frame.render_stateful_widget(art_widget, art_rect, protocol);
         }
 
-        // Main view
-        match self.view {
-            View::Collection => {
-                let view = CollectionView {
-                    albums: &self.albums,
-                    filtered_indices: &self.collection_filtered_indices,
-                };
-                frame.render_stateful_widget(view, chunks[1], &mut self.collection_state);
-            }
-            View::Album => {
-                if let Some(idx) = self.selected_album_idx
-                    && let Some(album) = self.albums.get(idx)
-                {
-                    let current = self.queue.current_item();
-                    let view = AlbumView {
-                        album,
-                        playing_album_id: current.map(|q| q.item_id),
-                        playing_track_num: current.map(|q| q.track.track_num),
-                        filtered_indices: &self.album_filtered_indices,
-                    };
-                    frame.render_stateful_widget(view, chunks[1], &mut self.album_state);
-                }
-            }
-            View::Downloaded => {
-                let view = DownloadedView {
-                    albums: &self.albums,
-                    library: &self.library,
-                    filtered_indices: &self.downloaded_filtered_indices,
-                };
-                frame.render_stateful_widget(view, chunks[1], &mut self.downloaded_state);
-            }
-            View::Settings => {
-                let username = self
-                    .auth
-                    .as_ref()
-                    .and_then(|a| a.username.as_deref())
-                    .unwrap_or("not logged in");
-                let downloaded_count = self
-                    .library
-                    .albums
-                    .values()
-                    .filter(|a| a.status == crate::library::AlbumDownloadStatus::Complete)
-                    .count();
-                let view = SettingsView {
-                    username,
-                    album_count: self.albums.len(),
-                    downloaded_count,
-                };
-                frame.render_widget(view, chunks[1]);
-            }
-        }
+        // Three-column layout
+        let columns = Layout::horizontal([
+            Constraint::Percentage(25),
+            Constraint::Percentage(35),
+            Constraint::Percentage(40),
+        ])
+        .split(chunks[1]);
+
+        // Column 1: Artists
+        let artist_view = ArtistColumn {
+            artists: &self.artist_index.artists,
+            filtered_indices: &self.artist_filtered,
+            focused: self.focus == Column::Artists,
+        };
+        frame.render_stateful_widget(artist_view, columns[0], &mut self.artist_state);
+
+        // Column 2: Albums for selected artist
+        let artist_albums = self.current_artist_album_indices();
+        let album_view = AlbumColumn {
+            albums: &self.albums,
+            album_indices: &artist_albums,
+            filtered_indices: &self.album_filtered,
+            library: &self.library,
+            focused: self.focus == Column::Albums,
+        };
+        frame.render_stateful_widget(album_view, columns[1], &mut self.album_state);
+
+        // Column 3: Tracks for selected album
+        let current = self.queue.current_item();
+        let playing_album_id = current.map(|q| q.item_id);
+        let playing_track_num = current.map(|q| q.track.track_num);
+        let selected_album = self.selected_album_idx.and_then(|i| self.albums.get(i));
+        let track_view = TrackColumn {
+            album: selected_album,
+            playing_album_id,
+            playing_track_num,
+            filtered_indices: &self.track_filtered,
+            library: &self.library,
+            focused: self.focus == Column::Tracks,
+            loading: self.loading_tracks,
+        };
+        frame.render_stateful_widget(track_view, columns[2], &mut self.track_state);
 
         // Status bar
         let status_area = chunks[2];
@@ -167,8 +183,8 @@ impl App {
             } else {
                 " "
             };
-            let search_text = format!(" search: {}{}", self.active_filter(), cursor);
-            let search_bar = ratatui::widgets::Paragraph::new(search_text).style(
+            let search_text = format!(" search: {}{}", self.filter_text, cursor);
+            let search_bar = Paragraph::new(search_text).style(
                 ratatui::style::Style::default()
                     .fg(theme::ACCENT)
                     .add_modifier(ratatui::style::Modifier::BOLD),
@@ -178,31 +194,68 @@ impl App {
         }
 
         let status_chunks =
-            Layout::horizontal([Constraint::Length(56), Constraint::Min(5)]).split(status_area);
+            Layout::horizontal([Constraint::Min(10), Constraint::Min(5)]).split(status_area);
 
-        let tab_index = match self.view {
-            View::Collection => 0,
-            View::Album => 1,
-            View::Downloaded => 2,
-            View::Settings => 3,
+        // Breadcrumb
+        let mut crumbs: Vec<Span> = vec![Span::styled(" Artists", theme::dim())];
+        if let Some(artist) = self.selected_artist_name() {
+            crumbs.push(Span::styled(" > ", theme::dim()));
+            crumbs.push(Span::styled(artist, theme::dim()));
+            if let Some(album) = self.selected_album() {
+                crumbs.push(Span::styled(" > ", theme::dim()));
+                crumbs.push(Span::styled(album.album_title.as_str(), theme::dim()));
+            }
+        }
+        let breadcrumb = Paragraph::new(Line::from(crumbs));
+        frame.render_widget(breadcrumb, status_chunks[0]);
+
+        let right_text = if self.status_msg.is_empty() {
+            " ? help ".to_string()
+        } else {
+            format!(" {} ", self.status_msg)
         };
-        let tabs = ratatui::widgets::Tabs::new(vec![
-            "[1] Collection",
-            "[2] Album",
-            "[3] Downloaded",
-            "[4] Info",
-        ])
-        .select(tab_index)
-        .style(theme::dim())
-        .highlight_style(theme::selected())
-        .divider("");
-        frame.render_widget(tabs, status_chunks[0]);
+        let status = Paragraph::new(right_text)
+            .style(theme::dim())
+            .alignment(ratatui::layout::Alignment::Right);
+        frame.render_widget(status, status_chunks[1]);
 
-        if !self.status_msg.is_empty() {
-            let status = ratatui::widgets::Paragraph::new(format!(" {} ", self.status_msg))
-                .style(theme::dim())
-                .alignment(ratatui::layout::Alignment::Right);
-            frame.render_widget(status, status_chunks[1]);
+        // Settings overlay
+        if self.show_settings {
+            let overlay_area = centered_rect(80, 80, chunks[1]);
+            frame.render_widget(Clear, overlay_area);
+            let username = self
+                .auth
+                .as_ref()
+                .and_then(|a| a.username.as_deref())
+                .unwrap_or("not logged in");
+            let downloaded_count = self
+                .library
+                .albums
+                .values()
+                .filter(|a| a.status == crate::library::AlbumDownloadStatus::Complete)
+                .count();
+            let view = SettingsView {
+                username,
+                album_count: self.albums.len(),
+                downloaded_count,
+            };
+            frame.render_widget(view, overlay_area);
         }
     }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::vertical([
+        Constraint::Percentage((100 - percent_y) / 2),
+        Constraint::Percentage(percent_y),
+        Constraint::Percentage((100 - percent_y) / 2),
+    ])
+    .split(area);
+
+    Layout::horizontal([
+        Constraint::Percentage((100 - percent_x) / 2),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage((100 - percent_x) / 2),
+    ])
+    .split(vertical[1])[1]
 }

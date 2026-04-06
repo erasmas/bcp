@@ -6,8 +6,6 @@ use std::time::SystemTime;
 use crate::bandcamp::models::Album;
 use crate::config;
 
-const DEFAULT_TTL_SECS: u64 = 3600; // 1 hour
-
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedCollection {
     albums: Vec<Album>,
@@ -26,15 +24,6 @@ pub fn load_cached_collection() -> Result<Option<Vec<Album>>> {
 
     let data = std::fs::read_to_string(&path)?;
     let cached: CachedCollection = serde_json::from_str(&data)?;
-
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    if now - cached.timestamp > DEFAULT_TTL_SECS {
-        return Ok(None); // Expired
-    }
 
     Ok(Some(cached.albums))
 }
@@ -62,32 +51,4 @@ pub fn invalidate_cache() -> Result<()> {
         std::fs::remove_file(&path)?;
     }
     Ok(())
-}
-
-/// Check whether a cache timestamp is still valid given current time.
-#[cfg(test)]
-pub(crate) fn is_cache_fresh(cached_timestamp: u64, now: u64) -> bool {
-    now.saturating_sub(cached_timestamp) <= DEFAULT_TTL_SECS
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fresh_cache() {
-        assert!(is_cache_fresh(1000, 1000));
-        assert!(is_cache_fresh(1000, 1000 + DEFAULT_TTL_SECS));
-    }
-
-    #[test]
-    fn expired_cache() {
-        assert!(!is_cache_fresh(1000, 1000 + DEFAULT_TTL_SECS + 1));
-    }
-
-    #[test]
-    fn zero_timestamp() {
-        assert!(is_cache_fresh(0, DEFAULT_TTL_SECS));
-        assert!(!is_cache_fresh(0, DEFAULT_TTL_SECS + 1));
-    }
 }
