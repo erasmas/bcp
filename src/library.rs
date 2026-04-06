@@ -146,11 +146,7 @@ pub struct TrackMetadata {
 
 /// Download cover art to the album's directory if not already present.
 /// Returns the path to the cover file.
-pub async fn download_cover(
-    artist: &str,
-    album_title: &str,
-    art_url: &str,
-) -> Result<PathBuf> {
+pub async fn download_cover(artist: &str, album_title: &str, art_url: &str) -> Result<PathBuf> {
     let base = config::library_dir()?;
     let dir = album_dir(&base, artist, album_title);
     std::fs::create_dir_all(&dir)?;
@@ -169,7 +165,11 @@ pub async fn download_cover(
 /// Check if cover art exists for an album.
 pub fn has_cover(artist: &str, album_title: &str) -> bool {
     config::library_dir()
-        .map(|base| album_dir(&base, artist, album_title).join("cover.jpg").exists())
+        .map(|base| {
+            album_dir(&base, artist, album_title)
+                .join("cover.jpg")
+                .exists()
+        })
         .unwrap_or(false)
 }
 
@@ -341,10 +341,7 @@ pub fn download_track(
         let file_path = dir.join(&file_name);
 
         if file_path.exists() {
-            let _ = tx.send(DownloadEvent::TrackDone {
-                item_id,
-                track_num,
-            });
+            let _ = tx.send(DownloadEvent::TrackDone { item_id, track_num });
             return;
         }
 
@@ -365,10 +362,7 @@ pub fn download_track(
                         });
                         return;
                     }
-                    let _ = tx.send(DownloadEvent::TrackDone {
-                        item_id,
-                        track_num,
-                    });
+                    let _ = tx.send(DownloadEvent::TrackDone { item_id, track_num });
                 }
                 Err(e) => {
                     let _ = tx.send(DownloadEvent::Error {

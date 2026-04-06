@@ -30,7 +30,9 @@ impl<'a> StatefulWidget for AlbumColumn<'a> {
             .filter_map(|&album_idx| self.albums.get(album_idx))
             .map(|album| {
                 let indicator = match self.library.album_status(album.item_id) {
-                    Some(AlbumDownloadStatus::Complete) => Span::styled("\u{2913} ", theme::playing()),
+                    Some(AlbumDownloadStatus::Complete) => {
+                        Span::styled("\u{2913} ", theme::playing())
+                    }
                     Some(AlbumDownloadStatus::Downloading | AlbumDownloadStatus::Partial) => {
                         Span::styled("\u{2913} ", theme::playing())
                     }

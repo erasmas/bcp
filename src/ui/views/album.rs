@@ -59,40 +59,40 @@ impl<'a> StatefulWidget for TrackColumn<'a> {
 
         let is_playing_album = self.playing_album_id == Some(album.item_id);
 
-        let items: Vec<ListItem> = self
-            .filtered_indices
-            .iter()
-            .filter_map(|&i| album.tracks.get(i))
-            .map(|track| {
-                let is_playing = is_playing_album
-                    && self.playing_track_num.is_some_and(|n| n == track.track_num);
+        let items: Vec<ListItem> =
+            self.filtered_indices
+                .iter()
+                .filter_map(|&i| album.tracks.get(i))
+                .map(|track| {
+                    let is_playing = is_playing_album
+                        && self.playing_track_num.is_some_and(|n| n == track.track_num);
 
-                let style = if is_playing {
-                    theme::playing()
-                } else {
-                    theme::normal()
-                };
+                    let style = if is_playing {
+                        theme::playing()
+                    } else {
+                        theme::normal()
+                    };
 
-                let dl_indicator = if self.album.is_some_and(|a| {
-                    self.library.is_track_downloaded(a.item_id, track.track_num)
-                }) {
-                    Span::styled("\u{2913} ", theme::playing())
-                } else {
-                    Span::raw("  ")
-                };
+                    let dl_indicator = if self.album.is_some_and(|a| {
+                        self.library.is_track_downloaded(a.item_id, track.track_num)
+                    }) {
+                        Span::styled("\u{2913} ", theme::playing())
+                    } else {
+                        Span::raw("  ")
+                    };
 
-                let line = Line::from(vec![
-                    dl_indicator,
-                    Span::styled(format!("{:2}. ", track.track_num), theme::dim()),
-                    Span::styled(&track.title, style),
-                    Span::styled(
-                        format!("  {}", format_duration(track.duration)),
-                        theme::dim(),
-                    ),
-                ]);
-                ListItem::new(line)
-            })
-            .collect();
+                    let line = Line::from(vec![
+                        dl_indicator,
+                        Span::styled(format!("{:2}. ", track.track_num), theme::dim()),
+                        Span::styled(&track.title, style),
+                        Span::styled(
+                            format!("  {}", format_duration(track.duration)),
+                            theme::dim(),
+                        ),
+                    ]);
+                    ListItem::new(line)
+                })
+                .collect();
 
         let title = format!(" {} - {} ", album.artist_name, album.album_title);
 
@@ -104,7 +104,9 @@ impl<'a> StatefulWidget for TrackColumn<'a> {
                     .borders(Borders::ALL)
                     .border_style(border_style),
             )
-            .highlight_style(ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::BOLD))
+            .highlight_style(
+                ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::BOLD),
+            )
             .highlight_symbol("> ");
 
         StatefulWidget::render(list, area, buf, state);

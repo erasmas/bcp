@@ -82,8 +82,7 @@ impl App {
             }
             // Fall back to network and save locally
             if let Some(ref art) = art_url {
-                if let Ok(_) =
-                    crate::library::download_cover(&artist_name, &album_title, art).await
+                if let Ok(_) = crate::library::download_cover(&artist_name, &album_title, art).await
                 {
                     if let Ok(base) = crate::config::library_dir() {
                         let path = base
@@ -159,7 +158,9 @@ impl App {
 
         // Fetch details for albums that need it
         for &idx in &artist_albums {
-            if self.albums[idx].tracks.is_empty() && !self.library.is_downloaded(self.albums[idx].item_id) {
+            if self.albums[idx].tracks.is_empty()
+                && !self.library.is_downloaded(self.albums[idx].item_id)
+            {
                 let url = self.albums[idx].item_url.clone();
                 self.status_msg = format!(
                     "Fetching: {} - {}...",
@@ -276,7 +277,10 @@ impl App {
             return;
         };
 
-        if self.library.is_track_downloaded(album.item_id, track.track_num) {
+        if self
+            .library
+            .is_track_downloaded(album.item_id, track.track_num)
+        {
             self.status_msg = "Track already downloaded".to_string();
             return;
         }

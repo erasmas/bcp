@@ -1,6 +1,9 @@
 mod draw;
 mod input;
 mod playback;
+mod update;
+
+pub use update::Message;
 
 use anyhow::Result;
 use ratatui::widgets::ListState;
@@ -235,18 +238,21 @@ impl App {
     pub async fn handle_event(&mut self, event: AppEvent) -> Result<()> {
         match event {
             AppEvent::Key(key) => {
-                self.handle_key(key).await?;
+                if let Some(msg) = self.map_key(key) {
+                    self.update(msg).await?;
+                }
                 self.dirty = true;
             }
             AppEvent::Resize => {
                 self.dirty = true;
             }
-            AppEvent::Tick => self.handle_tick().await?,
+            AppEvent::Tick => self.poll_async_results().await?,
         }
         Ok(())
     }
 
-    async fn handle_tick(&mut self) -> Result<()> {
+    /// Poll all async channels and dispatch results as Messages.
+    async fn poll_async_results(&mut self) -> Result<()> {
         if self.filter_mode {
             self.dirty = true;
         }
@@ -261,125 +267,38 @@ impl App {
             }
         }
 
-        let mut track_finished = false;
+        // Collect messages from channels
+        let mut messages = Vec::new();
+
+        // Player events
         if let Some(ref mut engine) = self.engine {
             while let Ok(event) = engine.event_rx.try_recv() {
                 match event {
-                    PlayerEvent::Finished => track_finished = true,
-                    PlayerEvent::Error(e) => {
-                        self.status_msg = format!("Playback error: {}", e);
-                        self.dirty = true;
-                    }
+                    PlayerEvent::Finished => messages.push(Message::TrackFinished),
+                    PlayerEvent::Error(e) => messages.push(Message::PlaybackError(e)),
                     _ => {}
                 }
             }
         }
-        if track_finished {
-            self.play_next();
-        }
 
-        // Check for album detail fetch result
+        // Album detail fetch (single)
         if let Some((idx, ref mut rx)) = self.tracks_rx {
             if let Ok(result) = rx.try_recv() {
                 self.tracks_rx = None;
-                self.loading_tracks = false;
                 match result {
-                    Ok(detail) => {
-                        self.albums[idx].tracks = detail.tracks;
-                        self.albums[idx].about = detail.about;
-                        self.albums[idx].credits = detail.credits;
-                        self.albums[idx].release_date = detail.release_date;
-                        // Save metadata.json
-                        let album = &self.albums[idx];
-                        let meta = library::AlbumMetadata {
-                            item_id: album.item_id,
-                            tracks: album
-                                .tracks
-                                .iter()
-                                .map(|t| library::TrackMetadata {
-                                    track_num: t.track_num,
-                                    title: t.title.clone(),
-                                    duration: t.duration,
-                                    stream_url: t.stream_url.clone(),
-                                })
-                                .collect(),
-                            about: album.about.clone(),
-                            credits: album.credits.clone(),
-                            release_date: album.release_date.clone(),
-                        };
-                        let _ = library::save_album_metadata(
-                            &album.artist_name,
-                            &album.album_title,
-                            &meta,
-                        );
-                        self.recompute_track_filter();
-                        if !self.track_filtered.is_empty() && self.track_state.selected().is_none()
-                        {
-                            self.track_state.select(Some(0));
-                        }
-                        self.status_msg = String::new();
-                    }
-                    Err(e) => {
-                        self.status_msg = format!("Failed to load album: {}", e);
-                    }
+                    Ok(detail) => messages.push(Message::AlbumDetailLoaded { idx, detail }),
+                    Err(e) => messages.push(Message::AlbumDetailFailed(e.to_string())),
                 }
-                self.dirty = true;
             }
         }
 
-        // Check for background album detail fetches (duration hydration)
+        // Background prefetch
         if let Some(ref mut rx) = self.detail_rx {
-            let mut got_any = false;
             let mut done = false;
             loop {
                 match rx.try_recv() {
                     Ok((idx, detail)) => {
-                        self.albums[idx].tracks = detail.tracks;
-                        self.albums[idx].about = detail.about;
-                        self.albums[idx].credits = detail.credits;
-                        self.albums[idx].release_date = detail.release_date;
-                        // Save metadata.json to disk
-                        let album = &self.albums[idx];
-                        let meta = library::AlbumMetadata {
-                            item_id: album.item_id,
-                            tracks: album
-                                .tracks
-                                .iter()
-                                .map(|t| library::TrackMetadata {
-                                    track_num: t.track_num,
-                                    title: t.title.clone(),
-                                    duration: t.duration,
-                                    stream_url: t.stream_url.clone(),
-                                })
-                                .collect(),
-                            about: album.about.clone(),
-                            credits: album.credits.clone(),
-                            release_date: album.release_date.clone(),
-                        };
-                        let _ = library::save_album_metadata(
-                            &album.artist_name,
-                            &album.album_title,
-                            &meta,
-                        );
-                        // Update durations in library for downloaded albums
-                        let item_id = album.item_id;
-                        if let Some(dl) = self.library.albums.get_mut(&item_id) {
-                            for track in &mut dl.tracks {
-                                if let Some(t) = self.albums[idx]
-                                    .tracks
-                                    .iter()
-                                    .find(|t| t.track_num == track.track_num)
-                                {
-                                    track.duration = t.duration;
-                                }
-                            }
-                        }
-                        self.prefetch_done += 1;
-                        self.status_msg = format!(
-                            "syncing album metadata ({}/{})...",
-                            self.prefetch_done, self.prefetch_total
-                        );
-                        got_any = true;
+                        messages.push(Message::PrefetchResult { idx, detail });
                     }
                     Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                         done = true;
@@ -388,89 +307,57 @@ impl App {
                     Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
                 }
             }
-            if got_any {
-                let _ = self.library.save();
-                self.recompute_track_filter();
-                self.dirty = true;
-            }
             if done {
-                self.detail_rx = None;
-                let _ = cache::save_collection_cache(&self.albums);
-                self.status_msg = String::new();
-                self.dirty = true;
+                messages.push(Message::PrefetchDone);
             }
         }
 
-        if let Some(ref mut rx) = self.mp3_rx
-            && let Ok(result) = rx.try_recv()
-        {
-            self.mp3_rx = None;
-            match result {
-                Ok(data) => {
-                    if let Some(ref engine) = self.engine {
-                        engine.play(data)?;
-                        self.is_paused = false;
-                        self.play_started = Some(Instant::now());
-                        self.pause_accumulated = 0.0;
-                        self.elapsed = 0.0;
-                        self.meta_scroll = None;
-                        self.status_msg = String::new();
-                        self.dirty = true;
-                    }
-                }
-                Err(e) => {
-                    self.status_msg = format!("Stream error: {}", e);
-                    self.dirty = true;
+        // MP3 download
+        if let Some(ref mut rx) = self.mp3_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.mp3_rx = None;
+                match result {
+                    Ok(data) => messages.push(Message::Mp3Ready(data)),
+                    Err(e) => messages.push(Message::Mp3Failed(e.to_string())),
                 }
             }
         }
 
-        if let Some(ref mut rx) = self.art_rx
-            && let Ok(result) = rx.try_recv()
-        {
-            self.art_rx = None;
-            if let Some(img) = result
-                && let Some(ref mut picker) = self.art_picker
-            {
-                self.art_protocol = Some(picker.new_resize_protocol(img));
-                self.dirty = true;
+        // Art download
+        if let Some(ref mut rx) = self.art_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.art_rx = None;
+                if let Some(img) = result {
+                    messages.push(Message::ArtReady(img));
+                }
             }
         }
 
+        // Download progress
         let mut completed_indices = Vec::new();
         for (i, rx) in self.download_rx.iter_mut().enumerate() {
             while let Ok(event) = rx.try_recv() {
                 match event {
                     DownloadEvent::TrackDone { item_id, track_num } => {
-                        if let Some(album) = self.library.albums.get_mut(&item_id)
-                            && let Some(track) =
-                                album.tracks.iter_mut().find(|t| t.track_num == track_num)
-                        {
-                            track.downloaded = true;
-                        }
-                        self.dirty = true;
+                        messages.push(Message::DownloadTrackDone { item_id, track_num });
                     }
                     DownloadEvent::AlbumDone { item_id } => {
-                        if let Some(album) = self.library.albums.get_mut(&item_id) {
-                            album.status = library::AlbumDownloadStatus::Complete;
-                            self.status_msg = format!(
-                                "Downloaded: {} - {}",
-                                album.artist_name, album.album_title
-                            );
-                        }
-                        let _ = self.library.save();
+                        messages.push(Message::DownloadAlbumDone { item_id });
                         completed_indices.push(i);
-                        self.dirty = true;
                     }
                     DownloadEvent::Error { item_id, msg } => {
-                        self.status_msg = format!("Download error ({}): {}", item_id, msg);
-                        self.dirty = true;
+                        messages.push(Message::DownloadError { item_id, msg });
                     }
                 }
             }
         }
         for i in completed_indices.into_iter().rev() {
             self.download_rx.remove(i);
+        }
+
+        // Process all collected messages
+        for msg in messages {
+            self.update(msg).await?;
         }
 
         Ok(())

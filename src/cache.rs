@@ -6,7 +6,6 @@ use std::time::SystemTime;
 use crate::bandcamp::models::Album;
 use crate::config;
 
-
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedCollection {
     albums: Vec<Album>,

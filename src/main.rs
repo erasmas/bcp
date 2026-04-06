@@ -171,7 +171,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                             app.artist_state.select(Some(0));
                             app.on_artist_changed();
                         }
-        
+
                         app.status_msg = format!(
                             "Offline mode ({} downloaded albums)",
                             app.library.albums.len()
