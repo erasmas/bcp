@@ -39,7 +39,7 @@ impl<'a> StatefulWidget for ArtistColumn<'a> {
                     .borders(Borders::ALL)
                     .border_style(border_style),
             )
-            .highlight_style(theme::selected())
+            .highlight_style(ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::BOLD))
             .highlight_symbol("> ");
 
         StatefulWidget::render(list, area, buf, state);

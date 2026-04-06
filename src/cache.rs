@@ -6,7 +6,6 @@ use std::time::SystemTime;
 use crate::bandcamp::models::Album;
 use crate::config;
 
-const DEFAULT_TTL_SECS: u64 = 3600; // 1 hour
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedCollection {
@@ -26,15 +25,6 @@ pub fn load_cached_collection() -> Result<Option<Vec<Album>>> {
 
     let data = std::fs::read_to_string(&path)?;
     let cached: CachedCollection = serde_json::from_str(&data)?;
-
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    if now - cached.timestamp > DEFAULT_TTL_SECS {
-        return Ok(None); // Expired
-    }
 
     Ok(Some(cached.albums))
 }

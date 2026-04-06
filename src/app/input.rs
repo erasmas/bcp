@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{App, AppScreen, Column, LoginStep, Overlay};
+use super::{App, AppScreen, Column, LoginStep};
 use crate::auth;
 use crate::bandcamp::client::BandcampClient;
 use crate::bandcamp::models::AuthData;
@@ -19,8 +19,12 @@ impl App {
             AppScreen::Login => self.handle_login_key(key).await?,
             AppScreen::Loading => {}
             AppScreen::Main => {
-                if self.overlay != Overlay::None {
-                    self.handle_overlay_key(key).await?;
+                if self.show_settings {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('?') => self.show_settings = false,
+                        KeyCode::Char('q') => self.should_quit = true,
+                        _ => {}
+                    }
                     return Ok(());
                 }
                 if self.filter_mode {
@@ -85,50 +89,6 @@ impl App {
         Ok(())
     }
 
-    async fn handle_overlay_key(&mut self, key: KeyEvent) -> Result<()> {
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('3') | KeyCode::Char('4') => {
-                self.overlay = Overlay::None;
-            }
-            KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Char('j') | KeyCode::Down => {
-                if self.overlay == Overlay::Library {
-                    let len = self.downloaded_filtered.len();
-                    if len > 0 {
-                        let current = self.downloaded_state.selected().unwrap_or(0);
-                        self.downloaded_state.select(Some((current + 1).min(len - 1)));
-                    }
-                }
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if self.overlay == Overlay::Library {
-                    let current = self.downloaded_state.selected().unwrap_or(0);
-                    self.downloaded_state
-                        .select(Some(current.saturating_sub(1)));
-                }
-            }
-            KeyCode::Enter => {
-                if self.overlay == Overlay::Library {
-                    let Some(selected) = self.downloaded_state.selected() else {
-                        return Ok(());
-                    };
-                    let Some(&actual_idx) = self.downloaded_filtered.get(selected) else {
-                        return Ok(());
-                    };
-
-                    self.start_loading_album_details(actual_idx);
-                    self.selected_album_idx = Some(actual_idx);
-                    self.overlay = Overlay::None;
-                    self.focus = Column::Tracks;
-                    self.recompute_track_filter();
-                    self.track_state.select(Some(0));
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
     async fn handle_main_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
@@ -142,24 +102,8 @@ impl App {
             }
             KeyCode::Char('h') | KeyCode::Left => self.handle_left(),
             KeyCode::Char('l') | KeyCode::Right => self.handle_right(),
-            KeyCode::Char('3') => {
-                self.overlay = if self.overlay == Overlay::Library {
-                    Overlay::None
-                } else {
-                    if self.downloaded_state.selected().is_none() && !self.albums.is_empty() {
-                        self.downloaded_state.select(Some(0));
-                    }
-                    Overlay::Library
-                };
-            }
-            KeyCode::Char('4') => {
-                self.overlay = if self.overlay == Overlay::Settings {
-                    Overlay::None
-                } else {
-                    Overlay::Settings
-                };
-            }
-            KeyCode::Char('d') => self.download_selected_album().await,
+            KeyCode::Char('?') => self.show_settings = !self.show_settings,
+            KeyCode::Char('d') => self.download_context().await,
             KeyCode::Char('D') => self.download_all_albums().await,
             KeyCode::Char('j') | KeyCode::Down => {
                 self.move_selection(1);
@@ -229,7 +173,6 @@ impl App {
             KeyCode::Char(c) => {
                 self.filter_text.push(c);
                 self.recompute_active_filter();
-                // Reset selection to top after filter change
                 match self.focus {
                     Column::Artists => self.artist_state.select(Some(0)),
                     Column::Albums => self.album_state.select(Some(0)),
@@ -242,7 +185,6 @@ impl App {
     }
 
     fn handle_left(&mut self) {
-        // Clear filter when changing columns
         if !self.filter_text.is_empty() {
             self.filter_text.clear();
         }
@@ -260,7 +202,6 @@ impl App {
     }
 
     fn handle_right(&mut self) {
-        // Clear filter when changing columns
         if !self.filter_text.is_empty() {
             self.filter_text.clear();
         }
@@ -288,7 +229,6 @@ impl App {
         }
     }
 
-    /// Called after j/k/g/G to cascade selection changes.
     fn on_selection_moved(&mut self) {
         match self.focus {
             Column::Artists => self.on_artist_changed(),
@@ -344,7 +284,6 @@ impl App {
         match self.focus {
             Column::Artists => {
                 if !self.album_filtered.is_empty() {
-                    // Clear filter when changing columns
                     if !self.filter_text.is_empty() {
                         self.filter_text.clear();
                     }
@@ -361,7 +300,6 @@ impl App {
                             self.track_state.select(Some(0));
                         }
                     }
-                    // Clear filter when changing columns
                     if !self.filter_text.is_empty() {
                         self.filter_text.clear();
                     }
@@ -409,6 +347,54 @@ impl App {
         if !self.albums[idx].tracks.is_empty() {
             return;
         }
+
+        // Try local metadata.json first
+        if let Some(meta) = crate::library::load_album_metadata(
+            &self.albums[idx].artist_name,
+            &self.albums[idx].album_title,
+        ) {
+            self.albums[idx].tracks = meta
+                .tracks
+                .iter()
+                .map(|t| crate::bandcamp::models::Track {
+                    title: t.title.clone(),
+                    track_num: t.track_num,
+                    duration: t.duration,
+                    stream_url: t.stream_url.clone(),
+                })
+                .collect();
+            self.albums[idx].about = meta.about;
+            self.albums[idx].credits = meta.credits;
+            self.albums[idx].release_date = meta.release_date;
+            self.recompute_track_filter();
+            if !self.track_filtered.is_empty() {
+                self.track_state.select(Some(0));
+            }
+            self.dirty = true;
+            return;
+        }
+
+        // Fall back to library index
+        let item_id = self.albums[idx].item_id;
+        if let Some(dl_album) = self.library.albums.get(&item_id) {
+            self.albums[idx].tracks = dl_album
+                .tracks
+                .iter()
+                .map(|t| crate::bandcamp::models::Track {
+                    title: t.title.clone(),
+                    track_num: t.track_num,
+                    duration: t.duration,
+                    stream_url: None,
+                })
+                .collect();
+            self.recompute_track_filter();
+            if !self.track_filtered.is_empty() {
+                self.track_state.select(Some(0));
+            }
+            self.dirty = true;
+            return;
+        }
+
         if self.loading_tracks {
             return;
         }
@@ -425,11 +411,10 @@ impl App {
         self.tracks_rx = Some((idx, rx));
 
         tokio::spawn(async move {
-            let result =
-                crate::bandcamp::client::BandcampClient::fetch_album_details_static(
-                    &http, &cookie, &url,
-                )
-                .await;
+            let result = crate::bandcamp::client::BandcampClient::fetch_album_details_static(
+                &http, &cookie, &url,
+            )
+            .await;
             let _ = tx.send(result);
         });
     }

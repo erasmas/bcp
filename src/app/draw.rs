@@ -6,12 +6,11 @@ use ratatui::{
 };
 use ratatui_image::StatefulImage;
 
-use super::{App, AppScreen, Column, LoginStep, Overlay};
+use super::{App, AppScreen, Column, LoginStep};
 use crate::ui::theme;
 use crate::ui::views::album::TrackColumn;
 use crate::ui::views::artist_column::ArtistColumn;
 use crate::ui::views::collection::AlbumColumn;
-use crate::ui::views::downloaded::DownloadedView;
 use crate::ui::views::now_playing::NowPlayingBar;
 use crate::ui::views::settings::SettingsView;
 
@@ -127,6 +126,7 @@ impl App {
             albums: &self.albums,
             album_indices: &artist_albums,
             filtered_indices: &self.album_filtered,
+            library: &self.library,
             focused: self.focus == Column::Albums,
         };
         frame.render_stateful_widget(album_view, columns[1], &mut self.album_state);
@@ -141,6 +141,7 @@ impl App {
             playing_album_id,
             playing_track_num,
             filtered_indices: &self.track_filtered,
+            library: &self.library,
             focused: self.focus == Column::Tracks,
             loading: self.loading_tracks,
         };
@@ -185,47 +186,37 @@ impl App {
         let breadcrumb = Paragraph::new(Line::from(crumbs));
         frame.render_widget(breadcrumb, status_chunks[0]);
 
-        if !self.status_msg.is_empty() {
-            let status = Paragraph::new(format!(" {} ", self.status_msg))
-                .style(theme::dim())
-                .alignment(ratatui::layout::Alignment::Right);
-            frame.render_widget(status, status_chunks[1]);
-        }
+        let right_text = if self.status_msg.is_empty() {
+            " ? help ".to_string()
+        } else {
+            format!(" {} ", self.status_msg)
+        };
+        let status = Paragraph::new(right_text)
+            .style(theme::dim())
+            .alignment(ratatui::layout::Alignment::Right);
+        frame.render_widget(status, status_chunks[1]);
 
-        // Overlays
-        match self.overlay {
-            Overlay::None => {}
-            Overlay::Library => {
-                let overlay_area = centered_rect(80, 80, chunks[1]);
-                frame.render_widget(Clear, overlay_area);
-                let view = DownloadedView {
-                    albums: &self.albums,
-                    library: &self.library,
-                    filtered_indices: &self.downloaded_filtered,
-                };
-                frame.render_stateful_widget(view, overlay_area, &mut self.downloaded_state);
-            }
-            Overlay::Settings => {
-                let overlay_area = centered_rect(80, 80, chunks[1]);
-                frame.render_widget(Clear, overlay_area);
-                let username = self
-                    .auth
-                    .as_ref()
-                    .and_then(|a| a.username.as_deref())
-                    .unwrap_or("not logged in");
-                let downloaded_count = self
-                    .library
-                    .albums
-                    .values()
-                    .filter(|a| a.status == crate::library::AlbumDownloadStatus::Complete)
-                    .count();
-                let view = SettingsView {
-                    username,
-                    album_count: self.albums.len(),
-                    downloaded_count,
-                };
-                frame.render_widget(view, overlay_area);
-            }
+        // Settings overlay
+        if self.show_settings {
+            let overlay_area = centered_rect(80, 80, chunks[1]);
+            frame.render_widget(Clear, overlay_area);
+            let username = self
+                .auth
+                .as_ref()
+                .and_then(|a| a.username.as_deref())
+                .unwrap_or("not logged in");
+            let downloaded_count = self
+                .library
+                .albums
+                .values()
+                .filter(|a| a.status == crate::library::AlbumDownloadStatus::Complete)
+                .count();
+            let view = SettingsView {
+                username,
+                album_count: self.albums.len(),
+                downloaded_count,
+            };
+            frame.render_widget(view, overlay_area);
         }
     }
 }

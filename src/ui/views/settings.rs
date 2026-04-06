@@ -76,16 +76,14 @@ impl<'a> Widget for SettingsView<'a> {
             ]),
             Line::from(vec![
                 Span::styled("  d ", theme::normal()),
-                Span::styled("download album  ", theme::dim()),
+                Span::styled("download  ", theme::dim()),
                 Span::styled("D ", theme::normal()),
                 Span::styled("download all  ", theme::dim()),
                 Span::styled("r ", theme::normal()),
                 Span::styled("refresh  ", theme::dim()),
             ]),
             Line::from(vec![
-                Span::styled("  3 ", theme::normal()),
-                Span::styled("library  ", theme::dim()),
-                Span::styled("4 ", theme::normal()),
+                Span::styled("  ? ", theme::normal()),
                 Span::styled("info  ", theme::dim()),
                 Span::styled("q ", theme::normal()),
                 Span::styled("quit", theme::dim()),

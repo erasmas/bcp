@@ -25,13 +25,6 @@ pub enum Column {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Overlay {
-    None,
-    Library,
-    Settings,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AppScreen {
     Login,
     Loading,
@@ -90,14 +83,13 @@ impl ArtistIndex {
 pub struct App {
     pub screen: AppScreen,
     pub focus: Column,
-    pub overlay: Overlay,
+    pub show_settings: bool,
     pub albums: Vec<Album>,
     pub artist_index: ArtistIndex,
     pub queue: PlayQueue,
     pub artist_state: ListState,
     pub album_state: ListState,
     pub track_state: ListState,
-    pub downloaded_state: ListState,
     pub library: LibraryIndex,
     pub download_rx: Vec<tokio::sync::mpsc::UnboundedReceiver<DownloadEvent>>,
     pub selected_album_idx: Option<usize>,
@@ -110,7 +102,6 @@ pub struct App {
     pub artist_filtered: Vec<usize>,
     pub album_filtered: Vec<usize>,
     pub track_filtered: Vec<usize>,
-    pub downloaded_filtered: Vec<usize>,
     pub loading_tracks: bool,
     pub filter_mode: bool,
     pub status_msg: String,
@@ -121,6 +112,9 @@ pub struct App {
     pub art_protocol: Option<StatefulProtocol>,
     pub art_picker: Option<Picker>,
     pub(crate) tracks_rx: Option<(usize, tokio::sync::oneshot::Receiver<Result<AlbumDetail>>)>,
+    pub(crate) detail_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(usize, AlbumDetail)>>,
+    pub(crate) prefetch_total: usize,
+    pub(crate) prefetch_done: usize,
     pub(crate) mp3_rx: Option<tokio::sync::oneshot::Receiver<Result<Vec<u8>>>>,
     pub(crate) art_rx: Option<tokio::sync::oneshot::Receiver<Option<image::DynamicImage>>>,
     pub(crate) engine: Option<AudioEngine>,
@@ -132,7 +126,7 @@ impl App {
         Self {
             screen: AppScreen::Login,
             focus: Column::Artists,
-            overlay: Overlay::None,
+            show_settings: false,
             albums: Vec::new(),
             artist_index: ArtistIndex {
                 artists: Vec::new(),
@@ -142,7 +136,6 @@ impl App {
             artist_state: ListState::default(),
             album_state: ListState::default(),
             track_state: ListState::default(),
-            downloaded_state: ListState::default(),
             library: LibraryIndex::load().unwrap_or_else(|_| LibraryIndex::new()),
             download_rx: Vec::new(),
             selected_album_idx: None,
@@ -155,7 +148,6 @@ impl App {
             artist_filtered: Vec::new(),
             album_filtered: Vec::new(),
             track_filtered: Vec::new(),
-            downloaded_filtered: Vec::new(),
             loading_tracks: false,
             filter_mode: false,
             status_msg: String::new(),
@@ -166,6 +158,9 @@ impl App {
             art_protocol: None,
             art_picker: Picker::from_query_stdio().ok(),
             tracks_rx: None,
+            detail_rx: None,
+            prefetch_total: 0,
+            prefetch_done: 0,
             mp3_rx: None,
             art_rx: None,
             engine: None,
@@ -192,7 +187,10 @@ impl App {
                 self.artist_state.select(Some(0));
                 self.on_artist_changed();
             }
-            self.status_msg = format!("Loaded {} albums from cache", self.albums.len());
+            self.hydrate_library_tracks();
+            if self.detail_rx.is_none() {
+                self.status_msg = format!("Loaded {} albums from cache", self.albums.len());
+            }
             return Ok(());
         }
 
@@ -227,7 +225,10 @@ impl App {
             self.artist_state.select(Some(0));
             self.on_artist_changed();
         }
-        self.status_msg = format!("Loaded {} albums", self.albums.len());
+        self.hydrate_library_tracks();
+        if self.detail_rx.is_none() {
+            self.status_msg = format!("Loaded {} albums", self.albums.len());
+        }
         Ok(())
     }
 
@@ -288,6 +289,29 @@ impl App {
                         self.albums[idx].about = detail.about;
                         self.albums[idx].credits = detail.credits;
                         self.albums[idx].release_date = detail.release_date;
+                        // Save metadata.json
+                        let album = &self.albums[idx];
+                        let meta = library::AlbumMetadata {
+                            item_id: album.item_id,
+                            tracks: album
+                                .tracks
+                                .iter()
+                                .map(|t| library::TrackMetadata {
+                                    track_num: t.track_num,
+                                    title: t.title.clone(),
+                                    duration: t.duration,
+                                    stream_url: t.stream_url.clone(),
+                                })
+                                .collect(),
+                            about: album.about.clone(),
+                            credits: album.credits.clone(),
+                            release_date: album.release_date.clone(),
+                        };
+                        let _ = library::save_album_metadata(
+                            &album.artist_name,
+                            &album.album_title,
+                            &meta,
+                        );
                         self.recompute_track_filter();
                         if !self.track_filtered.is_empty() && self.track_state.selected().is_none()
                         {
@@ -299,6 +323,80 @@ impl App {
                         self.status_msg = format!("Failed to load album: {}", e);
                     }
                 }
+                self.dirty = true;
+            }
+        }
+
+        // Check for background album detail fetches (duration hydration)
+        if let Some(ref mut rx) = self.detail_rx {
+            let mut got_any = false;
+            let mut done = false;
+            loop {
+                match rx.try_recv() {
+                    Ok((idx, detail)) => {
+                        self.albums[idx].tracks = detail.tracks;
+                        self.albums[idx].about = detail.about;
+                        self.albums[idx].credits = detail.credits;
+                        self.albums[idx].release_date = detail.release_date;
+                        // Save metadata.json to disk
+                        let album = &self.albums[idx];
+                        let meta = library::AlbumMetadata {
+                            item_id: album.item_id,
+                            tracks: album
+                                .tracks
+                                .iter()
+                                .map(|t| library::TrackMetadata {
+                                    track_num: t.track_num,
+                                    title: t.title.clone(),
+                                    duration: t.duration,
+                                    stream_url: t.stream_url.clone(),
+                                })
+                                .collect(),
+                            about: album.about.clone(),
+                            credits: album.credits.clone(),
+                            release_date: album.release_date.clone(),
+                        };
+                        let _ = library::save_album_metadata(
+                            &album.artist_name,
+                            &album.album_title,
+                            &meta,
+                        );
+                        // Update durations in library for downloaded albums
+                        let item_id = album.item_id;
+                        if let Some(dl) = self.library.albums.get_mut(&item_id) {
+                            for track in &mut dl.tracks {
+                                if let Some(t) = self.albums[idx]
+                                    .tracks
+                                    .iter()
+                                    .find(|t| t.track_num == track.track_num)
+                                {
+                                    track.duration = t.duration;
+                                }
+                            }
+                        }
+                        self.prefetch_done += 1;
+                        self.status_msg = format!(
+                            "syncing album metadata ({}/{})...",
+                            self.prefetch_done, self.prefetch_total
+                        );
+                        got_any = true;
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        done = true;
+                        break;
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                }
+            }
+            if got_any {
+                let _ = self.library.save();
+                self.recompute_track_filter();
+                self.dirty = true;
+            }
+            if done {
+                self.detail_rx = None;
+                let _ = cache::save_collection_cache(&self.albums);
+                self.status_msg = String::new();
                 self.dirty = true;
             }
         }
@@ -383,7 +481,127 @@ impl App {
     pub(crate) fn rebuild_artist_index(&mut self) {
         self.artist_index = ArtistIndex::build(&self.albums);
         self.recompute_artist_filter();
-        self.recompute_downloaded_filter();
+    }
+
+    /// Populate tracks from local metadata files and library, then prefetch
+    /// track metadata from the API for all remaining albums in the background.
+    pub(crate) fn hydrate_library_tracks(&mut self) {
+        // Populate tracks from metadata.json or library data
+        for album in self.albums.iter_mut() {
+            if !album.tracks.is_empty() {
+                continue;
+            }
+            // Try metadata.json first
+            if let Some(meta) = library::load_album_metadata(&album.artist_name, &album.album_title)
+            {
+                album.tracks = meta
+                    .tracks
+                    .iter()
+                    .map(|t| Track {
+                        title: t.title.clone(),
+                        track_num: t.track_num,
+                        duration: t.duration,
+                        stream_url: t.stream_url.clone(),
+                    })
+                    .collect();
+                album.about = meta.about;
+                album.credits = meta.credits;
+                album.release_date = meta.release_date;
+                continue;
+            }
+            // Fall back to library index
+            if let Some(dl) = self.library.albums.get(&album.item_id) {
+                album.tracks = dl
+                    .tracks
+                    .iter()
+                    .map(|t| Track {
+                        title: t.title.clone(),
+                        track_num: t.track_num,
+                        duration: t.duration,
+                        stream_url: None,
+                    })
+                    .collect();
+            }
+        }
+
+        // Download missing covers in the background
+        let needs_covers: Vec<(String, String, String)> = self
+            .albums
+            .iter()
+            .filter(|a| a.art_url.is_some() && !library::has_cover(&a.artist_name, &a.album_title))
+            .map(|a| {
+                (
+                    a.artist_name.clone(),
+                    a.album_title.clone(),
+                    a.art_url.clone().unwrap(),
+                )
+            })
+            .collect();
+
+        if !needs_covers.is_empty() {
+            tokio::spawn(async move {
+                for (artist, album_title, art_url) in needs_covers {
+                    let _ = library::download_cover(&artist, &album_title, &art_url).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+            });
+        }
+
+        // Prefetch track data for all albums that still have empty tracks
+        let needs_fetch: Vec<(usize, String, String, String, Option<String>)> = self
+            .albums
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.tracks.is_empty() && !a.item_url.is_empty())
+            .map(|(i, a)| {
+                (
+                    i,
+                    a.item_url.clone(),
+                    a.artist_name.clone(),
+                    a.album_title.clone(),
+                    a.art_url.clone(),
+                )
+            })
+            .collect();
+
+        if needs_fetch.is_empty() {
+            return;
+        }
+
+        let Some(ref client) = self.client else {
+            return;
+        };
+
+        let http = client.clone_http();
+        let cookie = client.cookie_header();
+        self.prefetch_total = needs_fetch.len();
+        self.prefetch_done = 0;
+        self.status_msg = format!("syncing album metadata (0/{})...", self.prefetch_total);
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.detail_rx = Some(rx);
+
+        tokio::spawn(async move {
+            for (idx, url, artist, album_title, art_url) in needs_fetch {
+                if let Ok(detail) =
+                    crate::bandcamp::client::BandcampClient::fetch_album_details_static(
+                        &http, &cookie, &url,
+                    )
+                    .await
+                {
+                    // Download cover art
+                    if let Some(ref art) = art_url {
+                        let _ = library::download_cover(&artist, &album_title, art).await;
+                    }
+
+                    if tx.send((idx, detail)).is_err() {
+                        break;
+                    }
+                }
+                // Rate limit to avoid overwhelming the Bandcamp API
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        });
     }
 
     // -- Selection cascade --
@@ -402,9 +620,10 @@ impl App {
         // Determine selected album index in the global albums vec
         if self.artist_state.selected().is_some() {
             let artist_albums = self.current_artist_album_indices();
-            if let Some(&filtered_idx) = self.album_filtered.get(
-                self.album_state.selected().unwrap_or(0),
-            ) {
+            if let Some(&filtered_idx) = self
+                .album_filtered
+                .get(self.album_state.selected().unwrap_or(0))
+            {
                 if let Some(&album_idx) = artist_albums.get(filtered_idx) {
                     self.selected_album_idx = Some(album_idx);
                 } else {
@@ -439,7 +658,10 @@ impl App {
     pub(crate) fn selected_artist_name(&self) -> Option<&str> {
         let selected = self.artist_state.selected()?;
         let &filtered_idx = self.artist_filtered.get(selected)?;
-        self.artist_index.artists.get(filtered_idx).map(|s| s.as_str())
+        self.artist_index
+            .artists
+            .get(filtered_idx)
+            .map(|s| s.as_str())
     }
 
     /// Get the selected album for display.
@@ -505,10 +727,6 @@ impl App {
         }
     }
 
-    pub(crate) fn recompute_downloaded_filter(&mut self) {
-        self.downloaded_filtered = (0..self.albums.len()).collect();
-    }
-
     pub(crate) fn recompute_active_filter(&mut self) {
         match self.focus {
             Column::Artists => {
@@ -535,7 +753,7 @@ impl App {
                 .map(|t| Track {
                     title: t.title.clone(),
                     track_num: t.track_num,
-                    duration: 0.0,
+                    duration: t.duration,
                     stream_url: None,
                 })
                 .collect();

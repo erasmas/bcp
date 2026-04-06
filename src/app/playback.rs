@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use super::App;
+use super::{App, Column};
 use crate::library;
 use crate::player::engine::AudioEngine;
 
@@ -60,23 +60,45 @@ impl App {
             });
         }
 
-        // Spawn art download in background
+        // Load album art - try local cover.jpg first, then fetch from network
+        let artist_name = item.artist_name.clone();
+        let album_title = item.album_title.clone();
         let art_url = item.art_url.clone();
-        if let Some(art) = art_url {
-            let art_sized = art.replace("_16.", "_5.");
-            let (art_tx, art_rx) = tokio::sync::oneshot::channel();
-            self.art_rx = Some(art_rx);
-            tokio::spawn(async move {
-                let client = reqwest::Client::new();
-                let result = async {
-                    let resp = client.get(&art_sized).send().await.ok()?;
-                    let bytes = resp.bytes().await.ok()?;
-                    image::load_from_memory(&bytes).ok()
+        let (art_tx, art_rx) = tokio::sync::oneshot::channel();
+        self.art_rx = Some(art_rx);
+        tokio::spawn(async move {
+            // Check local cover first
+            if crate::library::has_cover(&artist_name, &album_title) {
+                if let Ok(base) = crate::config::library_dir() {
+                    let path = base
+                        .join(crate::library::sanitize_for_path(&artist_name))
+                        .join(crate::library::sanitize_for_path(&album_title))
+                        .join("cover.jpg");
+                    if let Ok(img) = image::open(&path) {
+                        let _ = art_tx.send(Some(img));
+                        return;
+                    }
                 }
-                .await;
-                let _ = art_tx.send(result);
-            });
-        }
+            }
+            // Fall back to network and save locally
+            if let Some(ref art) = art_url {
+                if let Ok(_) =
+                    crate::library::download_cover(&artist_name, &album_title, art).await
+                {
+                    if let Ok(base) = crate::config::library_dir() {
+                        let path = base
+                            .join(crate::library::sanitize_for_path(&artist_name))
+                            .join(crate::library::sanitize_for_path(&album_title))
+                            .join("cover.jpg");
+                        if let Ok(img) = image::open(&path) {
+                            let _ = art_tx.send(Some(img));
+                            return;
+                        }
+                    }
+                }
+            }
+            let _ = art_tx.send(None);
+        });
     }
 
     pub(crate) fn play_next(&mut self) {
@@ -113,7 +135,75 @@ impl App {
         Ok(())
     }
 
-    pub(crate) async fn download_selected_album(&mut self) {
+    /// Context-sensitive download based on focused column.
+    pub(crate) async fn download_context(&mut self) {
+        match self.focus {
+            Column::Artists => self.download_artist_albums().await,
+            Column::Albums => self.download_selected_album().await,
+            Column::Tracks => self.download_selected_track().await,
+        }
+    }
+
+    async fn download_artist_albums(&mut self) {
+        let artist_albums = self.current_artist_album_indices();
+        if artist_albums.is_empty() {
+            return;
+        }
+
+        let cookie = self
+            .auth
+            .as_ref()
+            .map(|a| a.identity_cookie.clone())
+            .unwrap_or_default();
+        let mut count = 0;
+
+        // Fetch details for albums that need it
+        for &idx in &artist_albums {
+            if self.albums[idx].tracks.is_empty() && !self.library.is_downloaded(self.albums[idx].item_id) {
+                let url = self.albums[idx].item_url.clone();
+                self.status_msg = format!(
+                    "Fetching: {} - {}...",
+                    self.albums[idx].artist_name, self.albums[idx].album_title
+                );
+                self.dirty = true;
+                if let Some(ref client) = self.client
+                    && let Ok(detail) = client.fetch_album_details(&url).await
+                {
+                    self.albums[idx].tracks = detail.tracks;
+                    self.albums[idx].about = detail.about;
+                    self.albums[idx].credits = detail.credits;
+                    self.albums[idx].release_date = detail.release_date;
+                }
+            }
+        }
+
+        // Download each album
+        for &idx in &artist_albums {
+            let album = &self.albums[idx];
+            if album.tracks.is_empty() || self.library.is_downloaded(album.item_id) {
+                continue;
+            }
+
+            let entry = library::prepare_album_entry(album);
+            self.library.albums.insert(album.item_id, entry);
+
+            if let Ok(rx) = library::download_album(album, &cookie) {
+                self.download_rx.push(rx);
+                count += 1;
+            }
+        }
+
+        let _ = self.library.save();
+        if count > 0 {
+            let artist = self.selected_artist_name().unwrap_or("").to_string();
+            self.status_msg = format!("Downloading {} albums for {}", count, artist);
+        } else {
+            self.status_msg = "All albums already downloaded".to_string();
+        }
+        self.dirty = true;
+    }
+
+    async fn download_selected_album(&mut self) {
         let Some(idx) = self.selected_album_idx else {
             return;
         };
@@ -162,6 +252,55 @@ impl App {
                 self.download_rx.push(rx);
                 self.status_msg =
                     format!("Downloading: {} - {}", album.artist_name, album.album_title);
+            }
+            Err(e) => {
+                self.status_msg = format!("Download error: {}", e);
+            }
+        }
+        self.dirty = true;
+    }
+
+    async fn download_selected_track(&mut self) {
+        let Some(album_idx) = self.selected_album_idx else {
+            return;
+        };
+        let Some(selected) = self.track_state.selected() else {
+            return;
+        };
+        let Some(&track_idx) = self.track_filtered.get(selected) else {
+            return;
+        };
+
+        let album = &self.albums[album_idx];
+        let Some(track) = album.tracks.get(track_idx) else {
+            return;
+        };
+
+        if self.library.is_track_downloaded(album.item_id, track.track_num) {
+            self.status_msg = "Track already downloaded".to_string();
+            return;
+        }
+
+        let cookie = self
+            .auth
+            .as_ref()
+            .map(|a| a.identity_cookie.as_str())
+            .unwrap_or("");
+
+        // Ensure album entry exists in library
+        if !self.library.albums.contains_key(&album.item_id) {
+            let entry = library::prepare_album_entry(album);
+            self.library.albums.insert(album.item_id, entry);
+            let _ = self.library.save();
+        }
+
+        let track_num = track.track_num;
+        let track_title = track.title.clone();
+
+        match library::download_track(album, track_num, cookie) {
+            Ok(rx) => {
+                self.download_rx.push(rx);
+                self.status_msg = format!("Downloading track: {}", track_title);
             }
             Err(e) => {
                 self.status_msg = format!("Download error: {}", e);

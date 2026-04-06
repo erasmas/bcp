@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 use crate::bandcamp::models::Album;
+use crate::library::LibraryIndex;
 use crate::ui::theme;
 use crate::ui::widgets::format_duration;
 
@@ -14,6 +15,7 @@ pub struct TrackColumn<'a> {
     pub playing_album_id: Option<u64>,
     pub playing_track_num: Option<u32>,
     pub filtered_indices: &'a [usize],
+    pub library: &'a LibraryIndex,
     pub focused: bool,
     pub loading: bool,
 }
@@ -71,7 +73,16 @@ impl<'a> StatefulWidget for TrackColumn<'a> {
                     theme::normal()
                 };
 
+                let dl_indicator = if self.album.is_some_and(|a| {
+                    self.library.is_track_downloaded(a.item_id, track.track_num)
+                }) {
+                    Span::styled("\u{2913} ", theme::playing())
+                } else {
+                    Span::raw("  ")
+                };
+
                 let line = Line::from(vec![
+                    dl_indicator,
                     Span::styled(format!("{:2}. ", track.track_num), theme::dim()),
                     Span::styled(&track.title, style),
                     Span::styled(
@@ -93,7 +104,7 @@ impl<'a> StatefulWidget for TrackColumn<'a> {
                     .borders(Borders::ALL)
                     .border_style(border_style),
             )
-            .highlight_style(theme::selected())
+            .highlight_style(ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::BOLD))
             .highlight_symbol("> ");
 
         StatefulWidget::render(list, area, buf, state);
