@@ -4,30 +4,26 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, StatefulWidget},
 };
 
-use crate::bandcamp::models::Album;
 use crate::ui::theme;
 
-pub struct AlbumColumn<'a> {
-    pub albums: &'a [Album],
-    /// Indices into the artist's album list (which itself indexes into albums)
-    pub album_indices: &'a [usize],
+pub struct ArtistColumn<'a> {
+    pub artists: &'a [String],
     pub filtered_indices: &'a [usize],
     pub focused: bool,
 }
 
-impl<'a> StatefulWidget for AlbumColumn<'a> {
+impl<'a> StatefulWidget for ArtistColumn<'a> {
     type State = ListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
         let items: Vec<ListItem> = self
             .filtered_indices
             .iter()
-            .filter_map(|&i| self.album_indices.get(i))
-            .filter_map(|&album_idx| self.albums.get(album_idx))
-            .map(|album| ListItem::new(album.album_title.as_str()).style(theme::normal()))
+            .filter_map(|&i| self.artists.get(i))
+            .map(|name| ListItem::new(name.as_str()).style(theme::normal()))
             .collect();
 
-        let title = format!(" Albums ({}) ", self.filtered_indices.len());
+        let title = format!(" Artists ({}) ", self.filtered_indices.len());
 
         let border_style = if self.focused {
             theme::selected()

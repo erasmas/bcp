@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{App, AppScreen, LoginStep, View};
+use super::{App, AppScreen, Column, LoginStep, Overlay};
 use crate::auth;
 use crate::bandcamp::client::BandcampClient;
 use crate::bandcamp::models::AuthData;
@@ -19,6 +19,10 @@ impl App {
             AppScreen::Login => self.handle_login_key(key).await?,
             AppScreen::Loading => {}
             AppScreen::Main => {
+                if self.overlay != Overlay::None {
+                    self.handle_overlay_key(key).await?;
+                    return Ok(());
+                }
                 if self.filter_mode {
                     let is_nav = matches!(key.code, KeyCode::Up | KeyCode::Down | KeyCode::Enter);
                     if !is_nav {
@@ -81,41 +85,98 @@ impl App {
         Ok(())
     }
 
+    async fn handle_overlay_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('3') | KeyCode::Char('4') => {
+                self.overlay = Overlay::None;
+            }
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('j') | KeyCode::Down => {
+                if self.overlay == Overlay::Library {
+                    let len = self.downloaded_filtered.len();
+                    if len > 0 {
+                        let current = self.downloaded_state.selected().unwrap_or(0);
+                        self.downloaded_state.select(Some((current + 1).min(len - 1)));
+                    }
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if self.overlay == Overlay::Library {
+                    let current = self.downloaded_state.selected().unwrap_or(0);
+                    self.downloaded_state
+                        .select(Some(current.saturating_sub(1)));
+                }
+            }
+            KeyCode::Enter => {
+                if self.overlay == Overlay::Library {
+                    let Some(selected) = self.downloaded_state.selected() else {
+                        return Ok(());
+                    };
+                    let Some(&actual_idx) = self.downloaded_filtered.get(selected) else {
+                        return Ok(());
+                    };
+
+                    self.start_loading_album_details(actual_idx);
+                    self.selected_album_idx = Some(actual_idx);
+                    self.overlay = Overlay::None;
+                    self.focus = Column::Tracks;
+                    self.recompute_track_filter();
+                    self.track_state.select(Some(0));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     async fn handle_main_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Esc => {
-                if !self.active_filter().is_empty() {
-                    self.active_filter_mut().clear();
+                if !self.filter_text.is_empty() {
+                    self.filter_text.clear();
                     self.recompute_active_filter();
                 } else {
-                    match self.view {
-                        View::Album | View::Downloaded | View::Settings => {
-                            self.view = View::Collection
-                        }
-                        _ => {}
-                    }
+                    self.handle_left();
                 }
             }
-            KeyCode::Char('1') => self.view = View::Collection,
-            KeyCode::Char('2') => {
-                if self.selected_album_idx.is_some() {
-                    self.view = View::Album;
-                }
-            }
+            KeyCode::Char('h') | KeyCode::Left => self.handle_left(),
+            KeyCode::Char('l') | KeyCode::Right => self.handle_right(),
             KeyCode::Char('3') => {
-                self.view = View::Downloaded;
-                if self.downloaded_state.selected().is_none() && !self.albums.is_empty() {
-                    self.downloaded_state.select(Some(0));
-                }
+                self.overlay = if self.overlay == Overlay::Library {
+                    Overlay::None
+                } else {
+                    if self.downloaded_state.selected().is_none() && !self.albums.is_empty() {
+                        self.downloaded_state.select(Some(0));
+                    }
+                    Overlay::Library
+                };
             }
-            KeyCode::Char('4') => self.view = View::Settings,
+            KeyCode::Char('4') => {
+                self.overlay = if self.overlay == Overlay::Settings {
+                    Overlay::None
+                } else {
+                    Overlay::Settings
+                };
+            }
             KeyCode::Char('d') => self.download_selected_album().await,
             KeyCode::Char('D') => self.download_all_albums().await,
-            KeyCode::Char('j') | KeyCode::Down => self.move_selection(1),
-            KeyCode::Char('k') | KeyCode::Up => self.move_selection(-1),
-            KeyCode::Char('g') => self.move_to_top(),
-            KeyCode::Char('G') => self.move_to_bottom(),
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.move_selection(1);
+                self.on_selection_moved();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.move_selection(-1);
+                self.on_selection_moved();
+            }
+            KeyCode::Char('g') => {
+                self.move_to_top();
+                self.on_selection_moved();
+            }
+            KeyCode::Char('G') => {
+                self.move_to_bottom();
+                self.on_selection_moved();
+            }
             KeyCode::Enter => self.handle_enter().await?,
             KeyCode::Char(' ') => self.toggle_pause()?,
             KeyCode::Char('n') => self.play_next(),
@@ -136,16 +197,14 @@ impl App {
                 }
             }
             KeyCode::Char('r') => {
-                if self.view == View::Collection {
-                    cache::invalidate_cache()?;
-                    self.albums.clear();
-                    self.screen = AppScreen::Loading;
-                    self.status_msg = "Refreshing collection...".to_string();
-                }
+                cache::invalidate_cache()?;
+                self.albums.clear();
+                self.screen = AppScreen::Loading;
+                self.status_msg = "Refreshing collection...".to_string();
             }
             KeyCode::Char('/') => {
                 self.filter_mode = true;
-                self.active_filter_mut().clear();
+                self.filter_text.clear();
                 self.recompute_active_filter();
             }
             _ => {}
@@ -157,24 +216,24 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 self.filter_mode = false;
-                self.active_filter_mut().clear();
+                self.filter_text.clear();
                 self.recompute_active_filter();
             }
             KeyCode::Enter => {
                 self.filter_mode = false;
             }
             KeyCode::Backspace => {
-                self.active_filter_mut().pop();
+                self.filter_text.pop();
                 self.recompute_active_filter();
             }
             KeyCode::Char(c) => {
-                self.active_filter_mut().push(c);
+                self.filter_text.push(c);
                 self.recompute_active_filter();
-                match self.view {
-                    View::Collection => self.collection_state.select(Some(0)),
-                    View::Album => self.album_state.select(Some(0)),
-                    View::Downloaded => self.downloaded_state.select(Some(0)),
-                    _ => {}
+                // Reset selection to top after filter change
+                match self.focus {
+                    Column::Artists => self.artist_state.select(Some(0)),
+                    Column::Albums => self.album_state.select(Some(0)),
+                    Column::Tracks => self.track_state.select(Some(0)),
                 }
             }
             _ => {}
@@ -182,18 +241,67 @@ impl App {
         Ok(())
     }
 
+    fn handle_left(&mut self) {
+        // Clear filter when changing columns
+        if !self.filter_text.is_empty() {
+            self.filter_text.clear();
+        }
+        match self.focus {
+            Column::Tracks => {
+                self.focus = Column::Albums;
+                self.recompute_active_filter();
+            }
+            Column::Albums => {
+                self.focus = Column::Artists;
+                self.recompute_active_filter();
+            }
+            Column::Artists => {}
+        }
+    }
+
+    fn handle_right(&mut self) {
+        // Clear filter when changing columns
+        if !self.filter_text.is_empty() {
+            self.filter_text.clear();
+        }
+        match self.focus {
+            Column::Artists => {
+                if !self.album_filtered.is_empty() {
+                    self.focus = Column::Albums;
+                    self.recompute_active_filter();
+                }
+            }
+            Column::Albums => {
+                if let Some(album_idx) = self.selected_album_idx {
+                    if self.albums[album_idx].tracks.is_empty() {
+                        self.start_loading_album_details(album_idx);
+                        self.recompute_track_filter();
+                        if !self.track_filtered.is_empty() {
+                            self.track_state.select(Some(0));
+                        }
+                    }
+                    self.focus = Column::Tracks;
+                    self.recompute_active_filter();
+                }
+            }
+            Column::Tracks => {}
+        }
+    }
+
+    /// Called after j/k/g/G to cascade selection changes.
+    fn on_selection_moved(&mut self) {
+        match self.focus {
+            Column::Artists => self.on_artist_changed(),
+            Column::Albums => self.on_album_changed(),
+            Column::Tracks => {}
+        }
+    }
+
     fn move_selection(&mut self, delta: i32) {
-        let (state, len) = match self.view {
-            View::Collection => (
-                &mut self.collection_state,
-                self.collection_filtered_indices.len(),
-            ),
-            View::Album => (&mut self.album_state, self.album_filtered_indices.len()),
-            View::Downloaded => (
-                &mut self.downloaded_state,
-                self.downloaded_filtered_indices.len(),
-            ),
-            View::Settings => return,
+        let (state, len) = match self.focus {
+            Column::Artists => (&mut self.artist_state, self.artist_filtered.len()),
+            Column::Albums => (&mut self.album_state, self.album_filtered.len()),
+            Column::Tracks => (&mut self.track_state, self.track_filtered.len()),
         };
 
         if len == 0 {
@@ -210,56 +318,66 @@ impl App {
     }
 
     fn move_to_top(&mut self) {
-        match self.view {
-            View::Collection => self.collection_state.select(Some(0)),
-            View::Album => self.album_state.select(Some(0)),
-            View::Downloaded => self.downloaded_state.select(Some(0)),
-            View::Settings => {}
+        match self.focus {
+            Column::Artists => self.artist_state.select(Some(0)),
+            Column::Albums => self.album_state.select(Some(0)),
+            Column::Tracks => self.track_state.select(Some(0)),
         }
     }
 
     fn move_to_bottom(&mut self) {
-        let len = match self.view {
-            View::Collection => self.collection_filtered_indices.len(),
-            View::Album => self.album_filtered_indices.len(),
-            View::Downloaded => self.downloaded_filtered_indices.len(),
-            View::Settings => return,
+        let len = match self.focus {
+            Column::Artists => self.artist_filtered.len(),
+            Column::Albums => self.album_filtered.len(),
+            Column::Tracks => self.track_filtered.len(),
         };
         if len > 0 {
-            match self.view {
-                View::Collection => self.collection_state.select(Some(len - 1)),
-                View::Album => self.album_state.select(Some(len - 1)),
-                View::Downloaded => self.downloaded_state.select(Some(len - 1)),
-                View::Settings => {}
+            match self.focus {
+                Column::Artists => self.artist_state.select(Some(len - 1)),
+                Column::Albums => self.album_state.select(Some(len - 1)),
+                Column::Tracks => self.track_state.select(Some(len - 1)),
             }
         }
     }
 
     async fn handle_enter(&mut self) -> Result<()> {
-        match self.view {
-            View::Collection => {
-                let Some(selected) = self.collection_state.selected() else {
-                    return Ok(());
-                };
-                let Some(&actual_idx) = self.collection_filtered_indices.get(selected) else {
-                    return Ok(());
-                };
-
-                self.load_album_details(actual_idx).await?;
-                self.selected_album_idx = Some(actual_idx);
-                self.album_state.select(Some(0));
-                self.recompute_album_filter();
-                self.view = View::Album;
-                self.status_msg = String::new();
+        match self.focus {
+            Column::Artists => {
+                if !self.album_filtered.is_empty() {
+                    // Clear filter when changing columns
+                    if !self.filter_text.is_empty() {
+                        self.filter_text.clear();
+                    }
+                    self.focus = Column::Albums;
+                    self.recompute_active_filter();
+                }
             }
-            View::Album => {
+            Column::Albums => {
+                if let Some(album_idx) = self.selected_album_idx {
+                    if self.albums[album_idx].tracks.is_empty() {
+                        self.start_loading_album_details(album_idx);
+                        self.recompute_track_filter();
+                        if !self.track_filtered.is_empty() {
+                            self.track_state.select(Some(0));
+                        }
+                    }
+                    // Clear filter when changing columns
+                    if !self.filter_text.is_empty() {
+                        self.filter_text.clear();
+                    }
+                    self.focus = Column::Tracks;
+                    self.recompute_active_filter();
+                    self.status_msg = String::new();
+                }
+            }
+            Column::Tracks => {
                 let Some(album_idx) = self.selected_album_idx else {
                     return Ok(());
                 };
-                let Some(selected) = self.album_state.selected() else {
+                let Some(selected) = self.track_state.selected() else {
                     return Ok(());
                 };
-                let Some(&track_idx) = self.album_filtered_indices.get(selected) else {
+                let Some(&track_idx) = self.track_filtered.get(selected) else {
                     return Ok(());
                 };
 
@@ -283,47 +401,36 @@ impl App {
                 self.queue.replace_all(items, track_idx);
                 self.start_playback();
             }
-            View::Downloaded => {
-                let Some(selected) = self.downloaded_state.selected() else {
-                    return Ok(());
-                };
-                let Some(&actual_idx) = self.downloaded_filtered_indices.get(selected) else {
-                    return Ok(());
-                };
-
-                self.load_album_details(actual_idx).await?;
-                self.selected_album_idx = Some(actual_idx);
-                self.album_state.select(Some(0));
-                self.recompute_album_filter();
-                self.view = View::Album;
-                self.status_msg = String::new();
-            }
-            View::Settings => {}
         }
         Ok(())
     }
 
-    async fn load_album_details(&mut self, idx: usize) -> Result<()> {
+    fn start_loading_album_details(&mut self, idx: usize) {
         if !self.albums[idx].tracks.is_empty() {
-            return Ok(());
+            return;
         }
-        self.status_msg = "Loading album...".to_string();
+        if self.loading_tracks {
+            return;
+        }
+        let Some(ref client) = self.client else {
+            return;
+        };
+        self.loading_tracks = true;
+        self.dirty = true;
+
         let url = self.albums[idx].item_url.clone();
-        if let Some(ref client) = self.client {
-            match client.fetch_album_details(&url).await {
-                Ok(detail) => {
-                    self.albums[idx].tracks = detail.tracks;
-                    self.albums[idx].about = detail.about;
-                    self.albums[idx].credits = detail.credits;
-                    self.albums[idx].release_date = detail.release_date;
-                    self.recompute_album_filter();
-                }
-                Err(e) => {
-                    self.status_msg = format!("Failed to load album: {}", e);
-                    anyhow::bail!("Failed to load album");
-                }
-            }
-        }
-        Ok(())
+        let http = client.clone_http();
+        let cookie = client.cookie_header();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tracks_rx = Some((idx, rx));
+
+        tokio::spawn(async move {
+            let result =
+                crate::bandcamp::client::BandcampClient::fetch_album_details_static(
+                    &http, &cookie, &url,
+                )
+                .await;
+            let _ = tx.send(result);
+        });
     }
 }

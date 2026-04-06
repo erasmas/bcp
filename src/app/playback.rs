@@ -83,7 +83,7 @@ impl App {
         if self.queue.next().is_some() {
             self.start_playback();
             if let Some(idx) = self.queue.current {
-                self.album_state.select(Some(idx));
+                self.track_state.select(Some(idx));
             }
         } else {
             self.status_msg = "End of queue".to_string();
@@ -95,7 +95,7 @@ impl App {
         if self.queue.prev().is_some() {
             self.start_playback();
             if let Some(idx) = self.queue.current {
-                self.album_state.select(Some(idx));
+                self.track_state.select(Some(idx));
             }
         }
     }
@@ -114,22 +114,10 @@ impl App {
     }
 
     pub(crate) async fn download_selected_album(&mut self) {
-        let selected = match self.view {
-            super::View::Collection => self.collection_state.selected(),
-            super::View::Downloaded => self.downloaded_state.selected(),
-            _ => None,
+        let Some(idx) = self.selected_album_idx else {
+            return;
         };
 
-        let Some(selected) = selected else { return };
-
-        // Map filtered index to actual album index
-        let idx = match self.view {
-            super::View::Collection => self.collection_filtered_indices.get(selected).copied(),
-            super::View::Downloaded => self.downloaded_filtered_indices.get(selected).copied(),
-            _ => Some(selected),
-        };
-
-        let Some(idx) = idx else { return };
         if idx >= self.albums.len() {
             return;
         }

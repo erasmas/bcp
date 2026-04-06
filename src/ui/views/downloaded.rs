@@ -69,7 +69,7 @@ impl<'a> StatefulWidget for DownloadedView<'a> {
             .values()
             .filter(|a| a.status == AlbumDownloadStatus::Complete)
             .count();
-        let title = format!(" Downloaded ({}) ", downloaded_count);
+        let title = format!(" Library ({}) ", downloaded_count);
 
         let list = List::new(items)
             .block(

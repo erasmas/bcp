@@ -21,8 +21,12 @@ impl BandcampClient {
         }
     }
 
-    fn cookie_header(&self) -> String {
+    pub fn cookie_header(&self) -> String {
         format!("identity={}", self.identity_cookie)
+    }
+
+    pub fn clone_http(&self) -> reqwest::Client {
+        self.http.clone()
     }
 
     /// Fetch the fan_id and username via the collection_summary API
@@ -147,10 +151,18 @@ impl BandcampClient {
 
     /// Fetch track listing, stream URLs, and album metadata
     pub async fn fetch_album_details(&self, album_url: &str) -> Result<AlbumDetail> {
-        let resp = self
-            .http
+        Self::fetch_album_details_static(&self.http, &self.cookie_header(), album_url).await
+    }
+
+    /// Fetch album details using provided http client and cookie (for use from spawned tasks).
+    pub async fn fetch_album_details_static(
+        http: &reqwest::Client,
+        cookie: &str,
+        album_url: &str,
+    ) -> Result<AlbumDetail> {
+        let resp = http
             .get(album_url)
-            .header(COOKIE, self.cookie_header())
+            .header(COOKIE, cookie)
             .header(USER_AGENT, BC_USER_AGENT)
             .send()
             .await
