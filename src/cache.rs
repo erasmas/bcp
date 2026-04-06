@@ -52,31 +52,3 @@ pub fn invalidate_cache() -> Result<()> {
     }
     Ok(())
 }
-
-/// Check whether a cache timestamp is still valid given current time.
-#[cfg(test)]
-pub(crate) fn is_cache_fresh(cached_timestamp: u64, now: u64) -> bool {
-    now.saturating_sub(cached_timestamp) <= DEFAULT_TTL_SECS
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fresh_cache() {
-        assert!(is_cache_fresh(1000, 1000));
-        assert!(is_cache_fresh(1000, 1000 + DEFAULT_TTL_SECS));
-    }
-
-    #[test]
-    fn expired_cache() {
-        assert!(!is_cache_fresh(1000, 1000 + DEFAULT_TTL_SECS + 1));
-    }
-
-    #[test]
-    fn zero_timestamp() {
-        assert!(is_cache_fresh(0, DEFAULT_TTL_SECS));
-        assert!(!is_cache_fresh(0, DEFAULT_TTL_SECS + 1));
-    }
-}
