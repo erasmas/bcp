@@ -1,6 +1,6 @@
 [package]
 name = "bcp"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A terminal music player for your Bandcamp collection"
 
