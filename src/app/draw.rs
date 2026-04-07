@@ -11,7 +11,8 @@ use crate::ui::theme;
 use crate::ui::views::album::TrackColumn;
 use crate::ui::views::artist_column::ArtistColumn;
 use crate::ui::views::collection::AlbumColumn;
-use crate::ui::views::now_playing::{NowPlayingBar, logo_gradient};
+use crate::ui::logo::{LOGO, logo_gradient};
+use crate::ui::views::now_playing::NowPlayingBar;
 use crate::ui::views::settings::SettingsView;
 
 impl App {
@@ -25,29 +26,21 @@ impl App {
 
     fn draw_login(&self, frame: &mut Frame) {
         let area = frame.area();
+        // Layout is symmetric around the prompt line so it sits exactly in the
+        // vertical center: top Fill + logo(12) + gap(1) == status(2) + info(11) + bottom Fill.
         let chunks = Layout::vertical([
-            Constraint::Percentage(20),
-            Constraint::Length(12),
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Min(0),
+            Constraint::Fill(1),
+            Constraint::Length(12), // logo
+            Constraint::Length(1),  // gap
+            Constraint::Length(1),  // prompt (centered)
+            Constraint::Length(2),  // status
+            Constraint::Length(11), // info
+            Constraint::Fill(1),
         ])
         .split(area);
 
-        let logo_lines = [
-            "████                                            ",
-            "████                                            ",
-            "█████████████   █████████████   █████████████",
-            "█████████████   █████████████   █████████████",
-            "████     ████   ████            ████     ████",
-            "████     ████   ████            ████     ████",
-            "█████████████   █████████████   █████████████",
-            "█████████████   █████████████   █████████████",
-            "                                ████         ",
-            "                                ████         ",
-        ];
-        let gradient = logo_gradient(logo_lines.len());
-        let logo: Vec<Line> = logo_lines
+        let gradient = logo_gradient(LOGO.len());
+        let logo: Vec<Line> = LOGO
             .iter()
             .enumerate()
             .map(|(i, line)| {
@@ -72,14 +65,29 @@ impl App {
         let prompt = Paragraph::new(msg)
             .style(theme::normal())
             .alignment(ratatui::layout::Alignment::Center);
-        frame.render_widget(prompt, chunks[2]);
+        frame.render_widget(prompt, chunks[3]);
 
         if !self.status_msg.is_empty() {
             let status = Paragraph::new(self.status_msg.as_str())
                 .style(theme::dim())
                 .alignment(ratatui::layout::Alignment::Center);
-            frame.render_widget(status, chunks[3]);
+            frame.render_widget(status, chunks[4]);
         }
+
+        let info = "How this works:\n\
+                    \n\
+                    When you press Enter, bcp opens bandcamp.com in your default browser.\n\
+                    Once you're logged in, bcp reads the session cookie from the browser\n\
+                    profile and uses it to authenticate API requests on your behalf -\n\
+                    the cookie itself stays on your machine and is never uploaded.\n\
+                    \n\
+                    If your default browser is Chromium-based, your OS may ask once\n\
+                    to unlock the keyring where the cookie is stored. Firefox-based\n\
+                    browsers store cookies on disk directly and need no prompt.";
+        let info_widget = Paragraph::new(info)
+            .style(theme::dim())
+            .alignment(ratatui::layout::Alignment::Center);
+        frame.render_widget(info_widget, chunks[5]);
     }
 
     fn draw_loading(&self, frame: &mut Frame) {

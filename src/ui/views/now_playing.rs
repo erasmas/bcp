@@ -239,47 +239,17 @@ fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
     lines
 }
 
-const IDLE_LOGO: &[&str] = &[
-    "████                                            ",
-    "████                                            ",
-    "█████████████   █████████████   █████████████",
-    "█████████████   █████████████   █████████████",
-    "████     ████   ████            ████     ████",
-    "████     ████   ████            ████     ████",
-    "█████████████   █████████████   █████████████",
-    "█████████████   █████████████   █████████████",
-    "                                ████         ",
-    "                                ████         ",
-];
-
-pub fn logo_gradient(num_lines: usize) -> Vec<Color> {
-    let start = (136u8, 192u8, 208u8); // Nord8 cyan
-    let end = (180u8, 142u8, 173u8); // Nord15 purple
-    (0..num_lines)
-        .map(|i| {
-            let t = if num_lines <= 1 {
-                0.0
-            } else {
-                i as f32 / (num_lines - 1) as f32
-            };
-            Color::Rgb(
-                (start.0 as f32 + (end.0 as f32 - start.0 as f32) * t) as u8,
-                (start.1 as f32 + (end.1 as f32 - start.1 as f32) * t) as u8,
-                (start.2 as f32 + (end.2 as f32 - start.2 as f32) * t) as u8,
-            )
-        })
-        .collect()
-}
+use crate::ui::logo::{LOGO, logo_gradient};
 
 fn render_idle(area: Rect, buf: &mut Buffer) {
-    let logo_height = IDLE_LOGO.len() as u16;
-    let logo_width = IDLE_LOGO.first().map(|l| l.len()).unwrap_or(0) as u16;
+    let logo_height = LOGO.len() as u16;
+    let logo_width = LOGO.first().map(|l| l.len()).unwrap_or(0) as u16;
 
     let y_offset = area.height.saturating_sub(logo_height) / 2;
     let x_offset = area.width.saturating_sub(logo_width) / 2;
 
-    let gradient = logo_gradient(IDLE_LOGO.len());
-    for (i, line) in IDLE_LOGO.iter().enumerate() {
+    let gradient = logo_gradient(LOGO.len());
+    for (i, line) in LOGO.iter().enumerate() {
         let y = area.y + y_offset + i as u16;
         if y >= area.y + area.height {
             break;
