@@ -7,11 +7,11 @@ use ratatui::{
 use ratatui_image::StatefulImage;
 
 use super::{App, AppScreen, Column, LoginStep};
+use crate::ui::logo::{LOGO, logo_gradient};
 use crate::ui::theme;
 use crate::ui::views::album::TrackColumn;
 use crate::ui::views::artist_column::ArtistColumn;
 use crate::ui::views::collection::AlbumColumn;
-use crate::ui::logo::{LOGO, logo_gradient};
 use crate::ui::views::now_playing::NowPlayingBar;
 use crate::ui::views::settings::SettingsView;
 

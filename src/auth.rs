@@ -102,7 +102,8 @@ pub fn extract_bandcamp_cookie() -> Result<Option<String>> {
 #[cfg(target_os = "macos")]
 fn detect_default_browser() -> Option<Browser> {
     let home = dirs::home_dir()?;
-    let plist = home.join("Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist");
+    let plist = home
+        .join("Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist");
     let output = std::process::Command::new("plutil")
         .args(["-convert", "json", "-o", "-"])
         .arg(&plist)
@@ -115,7 +116,9 @@ fn detect_default_browser() -> Option<Browser> {
     let handlers = json.get("LSHandlers")?.as_array()?;
     let bundle_id = handlers.iter().find_map(|h| {
         if h.get("LSHandlerURLScheme")?.as_str()? == "http" {
-            h.get("LSHandlerRoleAll")?.as_str().map(|s| s.to_lowercase())
+            h.get("LSHandlerRoleAll")?
+                .as_str()
+                .map(|s| s.to_lowercase())
         } else {
             None
         }
@@ -193,8 +196,7 @@ fn try_firefox_profiles(base_path: &std::path::Path, domains: &[String]) -> Resu
         for entry in entries.flatten() {
             let cookies_db = entry.path().join("cookies.sqlite");
             if cookies_db.exists()
-                && let Ok(cookies) =
-                    rookie::firefox_based(cookies_db, Some(domains.to_vec()))
+                && let Ok(cookies) = rookie::firefox_based(cookies_db, Some(domains.to_vec()))
                 && let Some(cookie) = find_identity_cookie(&cookies)
             {
                 return Ok(Some(cookie));

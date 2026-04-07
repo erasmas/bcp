@@ -40,6 +40,10 @@ impl<'a> Widget for SettingsView<'a> {
         let info_lines = vec![
             Line::from(""),
             Line::from(vec![
+                Span::styled("  Version:      ", theme::dim()),
+                Span::styled(env!("CARGO_PKG_VERSION"), theme::normal()),
+            ]),
+            Line::from(vec![
                 Span::styled("  Account:      ", theme::dim()),
                 Span::styled(self.username, theme::normal()),
             ]),

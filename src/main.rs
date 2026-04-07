@@ -22,7 +22,11 @@ use app::App;
 use events::EventHandler;
 
 #[derive(Parser)]
-#[command(name = "bcp", about = "Bandcamp collection player for the terminal")]
+#[command(
+    name = "bcp",
+    version,
+    about = "Bandcamp collection player for the terminal"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
