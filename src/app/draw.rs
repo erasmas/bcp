@@ -126,6 +126,7 @@ impl App {
             meta_scroll: self.meta_scroll,
         };
         let np_area = chunks[0];
+        self.np_rect = np_area;
         frame.render_widget(now_playing, np_area);
 
         // Album art
@@ -142,6 +143,9 @@ impl App {
             Constraint::Percentage(40),
         ])
         .split(chunks[1]);
+        self.artist_rect = columns[0];
+        self.album_rect = columns[1];
+        self.track_rect = columns[2];
 
         // Column 1: Artists
         let artist_view = ArtistColumn {

@@ -16,6 +16,7 @@ impl Message {
             Self::Quit => Some(("q", "quit")),
             Self::FocusLeft => Some(("h / \u{2190}", "left")),
             Self::FocusRight => Some(("l / \u{2192}", "right")),
+            Self::FocusColumn(_) | Self::SelectAt(_, _) | Self::ScrollColumn(_, _) => None,
             Self::MoveUp => Some(("k / \u{2191}", "up")),
             Self::MoveDown => Some(("j / \u{2193}", "down")),
             Self::MoveToTop => Some(("g", "top")),
@@ -27,7 +28,6 @@ impl Message {
             Self::PrevTrack => Some(("p", "prev track")),
             Self::ScrollMetaDown => Some(("J", "scroll meta down")),
             Self::ScrollMetaUp => Some(("K", "scroll meta up")),
-            Self::ToggleMetaScroll => Some(("Tab", "toggle meta")),
             // Filter
             Self::StartFilter => Some(("/", "search")),
             Self::CancelFilter => Some(("Esc", "back/clear")),
@@ -66,7 +66,6 @@ impl Message {
             Message::TogglePause,
             Message::NextTrack,
             Message::PrevTrack,
-            Message::ToggleMetaScroll,
             Message::ScrollMetaDown,
             Message::ScrollMetaUp,
             Message::Download,
@@ -86,6 +85,9 @@ pub enum Message {
     Quit,
     FocusLeft,
     FocusRight,
+    FocusColumn(Column),
+    SelectAt(Column, usize),
+    ScrollColumn(Column, isize),
     MoveUp,
     MoveDown,
     MoveToTop,
@@ -98,7 +100,6 @@ pub enum Message {
     PrevTrack,
     ScrollMetaDown,
     ScrollMetaUp,
-    ToggleMetaScroll,
 
     // Filter
     StartFilter,
@@ -184,6 +185,89 @@ impl App {
                 }
             }
 
+            Message::FocusColumn(col) => {
+                if self.focus != col {
+                    if !self.filter_text.is_empty() {
+                        self.filter_text.clear();
+                    }
+                    // Only allow focusing columns that have content / are reachable.
+                    match col {
+                        Column::Artists => {
+                            self.focus = Column::Artists;
+                            self.recompute_active_filter();
+                        }
+                        Column::Albums => {
+                            if !self.album_filtered.is_empty() {
+                                self.focus = Column::Albums;
+                                self.recompute_active_filter();
+                            }
+                        }
+                        Column::Tracks => {
+                            if let Some(album_idx) = self.selected_album_idx {
+                                if self.albums[album_idx].tracks.is_empty() {
+                                    self.start_loading_album_details(album_idx);
+                                    self.recompute_track_filter();
+                                    if !self.track_filtered.is_empty() {
+                                        self.track_state.select(Some(0));
+                                    }
+                                }
+                                self.focus = Column::Tracks;
+                                self.recompute_active_filter();
+                            }
+                        }
+                    }
+                }
+            }
+
+            Message::ScrollColumn(col, delta) => {
+                let (len, rect, state) = match col {
+                    Column::Artists => (
+                        self.artist_filtered.len(),
+                        self.artist_rect,
+                        &mut self.artist_state,
+                    ),
+                    Column::Albums => (
+                        self.album_filtered.len(),
+                        self.album_rect,
+                        &mut self.album_state,
+                    ),
+                    Column::Tracks => (
+                        self.track_filtered.len(),
+                        self.track_rect,
+                        &mut self.track_state,
+                    ),
+                };
+                if len == 0 || rect.height < 3 {
+                    return Ok(());
+                }
+                let visible = (rect.height - 2) as usize;
+                let max_offset = len.saturating_sub(visible);
+                let cur_offset = state.offset() as isize;
+                let new_offset = (cur_offset + delta).clamp(0, max_offset as isize) as usize;
+                *state.offset_mut() = new_offset;
+            }
+
+            Message::SelectAt(col, idx) => {
+                let len = match col {
+                    Column::Artists => self.artist_filtered.len(),
+                    Column::Albums => self.album_filtered.len(),
+                    Column::Tracks => self.track_filtered.len(),
+                };
+                if idx < len {
+                    match col {
+                        Column::Artists => self.artist_state.select(Some(idx)),
+                        Column::Albums => self.album_state.select(Some(idx)),
+                        Column::Tracks => self.track_state.select(Some(idx)),
+                    }
+                    let prev_focus = self.focus;
+                    self.focus = col;
+                    if prev_focus != col {
+                        self.recompute_active_filter();
+                    }
+                    self.on_selection_moved();
+                }
+            }
+
             Message::MoveDown => {
                 self.move_selection(1);
                 self.on_selection_moved();
@@ -259,19 +343,10 @@ impl App {
             Message::PrevTrack => self.play_prev(),
 
             Message::ScrollMetaDown => {
-                let offset = self.meta_scroll.unwrap_or(0);
-                self.meta_scroll = Some(offset + 1);
+                self.meta_scroll += 1;
             }
             Message::ScrollMetaUp => {
-                let offset = self.meta_scroll.unwrap_or(0);
-                self.meta_scroll = Some(offset.saturating_sub(1));
-            }
-            Message::ToggleMetaScroll => {
-                if self.meta_scroll.is_some() {
-                    self.meta_scroll = None;
-                } else {
-                    self.meta_scroll = Some(0);
-                }
+                self.meta_scroll = self.meta_scroll.saturating_sub(1);
             }
 
             // -- Filter --
@@ -446,7 +521,7 @@ impl App {
                     self.play_started = Some(std::time::Instant::now());
                     self.pause_accumulated = 0.0;
                     self.elapsed = 0.0;
-                    self.meta_scroll = None;
+                    self.meta_scroll = 0;
                     self.status_msg = String::new();
                     self.dirty = true;
                 }
@@ -516,7 +591,51 @@ impl App {
         state.select(Some(new));
     }
 
+    /// Adjust the cached `ListState::offset` of `col` so the selected item is
+    /// visible. Needed because we render lists with the selection-cleared
+    /// trick (so ratatui no longer auto-scrolls into view).
+    pub(crate) fn ensure_visible(&mut self, col: Column) {
+        let (state, rect, len) = match col {
+            Column::Artists => (
+                &mut self.artist_state,
+                self.artist_rect,
+                self.artist_filtered.len(),
+            ),
+            Column::Albums => (
+                &mut self.album_state,
+                self.album_rect,
+                self.album_filtered.len(),
+            ),
+            Column::Tracks => (
+                &mut self.track_state,
+                self.track_rect,
+                self.track_filtered.len(),
+            ),
+        };
+        if rect.height < 3 || len == 0 {
+            return;
+        }
+        let visible = (rect.height - 2) as usize;
+        let max_off = len.saturating_sub(visible);
+        let off = state.offset().min(max_off);
+        let new_off = if let Some(sel) = state.selected() {
+            if sel < off {
+                sel
+            } else if sel >= off + visible {
+                sel + 1 - visible
+            } else {
+                off
+            }
+        } else {
+            off
+        };
+        if new_off != state.offset() {
+            *state.offset_mut() = new_off;
+        }
+    }
+
     fn on_selection_moved(&mut self) {
+        self.ensure_visible(self.focus);
         match self.focus {
             Column::Artists => self.on_artist_changed(),
             Column::Albums => self.on_album_changed(),

@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::player::queue::QueueItem;
 use crate::ui::theme;
-use crate::ui::widgets::format_duration;
+use crate::ui::widgets::{draw_vscrollbar, format_duration};
 
 /// Minimum percentage of the now-playing bar width reserved for album art
 const ART_PERCENT: u16 = 30;
@@ -18,7 +18,7 @@ pub struct NowPlayingBar<'a> {
     pub is_paused: bool,
     pub elapsed: f64,
     pub has_art: bool,
-    pub meta_scroll: Option<usize>, // None = auto, Some(n) = manual offset
+    pub meta_scroll: usize,
 }
 
 impl<'a> NowPlayingBar<'a> {
@@ -96,7 +96,7 @@ fn render_playing(
     item: &QueueItem,
     is_paused: bool,
     elapsed: f64,
-    meta_scroll: Option<usize>,
+    meta_scroll: usize,
 ) {
     if area.width < 5 || area.height < 1 {
         return;
@@ -141,7 +141,8 @@ fn render_playing(
 
     // Line 3+: album metadata (about, credits, release date) - auto-scrolling
     if area.height > 3 {
-        let max_width = area.width.saturating_sub(4) as usize;
+        // Reserve 1 column on the right for a scrollbar.
+        let max_width = area.width.saturating_sub(5) as usize;
         let visible_rows = (area.height - 3) as usize;
 
         // Build all text lines
@@ -172,19 +173,8 @@ fn render_playing(
             }
         }
 
-        // Scroll offset: manual if set, otherwise auto-scroll proportional to track duration
         let max_scroll = all_lines.len().saturating_sub(visible_rows);
-        let scroll_offset = match meta_scroll {
-            Some(manual) => manual.min(max_scroll),
-            None => {
-                if max_scroll > 0 && duration > 0.0 {
-                    let progress = (elapsed / duration).clamp(0.0, 1.0);
-                    (progress * max_scroll as f64) as usize
-                } else {
-                    0
-                }
-            }
-        };
+        let scroll_offset = meta_scroll.min(max_scroll);
 
         // Render visible window
         let visible = &all_lines[scroll_offset..];
@@ -194,6 +184,17 @@ fn render_playing(
             }
             let y = area.y + 3 + i as u16;
             buf.set_string(area.x + 2, y, line, theme::normal());
+        }
+
+        if area.width >= 2 {
+            draw_vscrollbar(
+                buf,
+                Rect::new(area.x + area.width - 2, area.y + 3, 1, visible_rows as u16),
+                all_lines.len(),
+                visible_rows,
+                scroll_offset,
+                true,
+            );
         }
     }
 }

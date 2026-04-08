@@ -2,13 +2,16 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, StatefulWidget, Widget},
+    widgets::{
+        Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
+        StatefulWidget, Widget,
+    },
 };
 
 use crate::bandcamp::models::Album;
 use crate::library::LibraryIndex;
 use crate::ui::theme;
-use crate::ui::widgets::format_duration;
+use crate::ui::widgets::{draw_vscrollbar, format_duration, render_list_independent};
 
 pub struct TrackColumn<'a> {
     pub album: Option<&'a Album>,
@@ -102,13 +105,26 @@ impl<'a> StatefulWidget for TrackColumn<'a> {
                     .title(title)
                     .title_style(theme::title())
                     .borders(Borders::ALL)
-                    .border_style(border_style),
+                    .border_style(border_style)
+                    .padding(Padding::right(1)),
             )
             .highlight_style(
                 ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::BOLD),
             )
-            .highlight_symbol("> ");
+            .highlight_symbol("> ")
+            .highlight_spacing(HighlightSpacing::Always);
 
-        StatefulWidget::render(list, area, buf, state);
+        render_list_independent(list, area, buf, state);
+
+        if area.height > 2 && area.width >= 2 {
+            draw_vscrollbar(
+                buf,
+                Rect::new(area.x + area.width - 2, area.y + 1, 1, area.height - 2),
+                self.filtered_indices.len(),
+                (area.height - 2) as usize,
+                state.offset(),
+                self.focused,
+            );
+        }
     }
 }

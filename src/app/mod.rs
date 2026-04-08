@@ -6,6 +6,7 @@ mod update;
 pub use update::Message;
 
 use anyhow::Result;
+use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
@@ -97,7 +98,7 @@ pub struct App {
     pub download_rx: Vec<tokio::sync::mpsc::UnboundedReceiver<DownloadEvent>>,
     pub selected_album_idx: Option<usize>,
     pub is_paused: bool,
-    pub meta_scroll: Option<usize>,
+    pub meta_scroll: usize,
     pub elapsed: f64,
     pub play_started: Option<Instant>,
     pub pause_accumulated: f64,
@@ -122,6 +123,11 @@ pub struct App {
     pub(crate) art_rx: Option<tokio::sync::oneshot::Receiver<Option<image::DynamicImage>>>,
     pub(crate) engine: Option<AudioEngine>,
     pub(crate) client: Option<BandcampClient>,
+    // Cached rects for mouse hit-testing, refreshed each draw.
+    pub(crate) artist_rect: Rect,
+    pub(crate) album_rect: Rect,
+    pub(crate) track_rect: Rect,
+    pub(crate) np_rect: Rect,
 }
 
 impl App {
@@ -143,7 +149,7 @@ impl App {
             download_rx: Vec::new(),
             selected_album_idx: None,
             is_paused: false,
-            meta_scroll: None,
+            meta_scroll: 0,
             elapsed: 0.0,
             play_started: None,
             pause_accumulated: 0.0,
@@ -168,6 +174,10 @@ impl App {
             art_rx: None,
             engine: None,
             client: None,
+            artist_rect: Rect::ZERO,
+            album_rect: Rect::ZERO,
+            track_rect: Rect::ZERO,
+            np_rect: Rect::ZERO,
         }
     }
 
@@ -239,6 +249,12 @@ impl App {
         match event {
             AppEvent::Key(key) => {
                 if let Some(msg) = self.map_key(key) {
+                    self.update(msg).await?;
+                }
+                self.dirty = true;
+            }
+            AppEvent::Mouse(m) => {
+                for msg in self.map_mouse(m) {
                     self.update(msg).await?;
                 }
                 self.dirty = true;
@@ -500,6 +516,7 @@ impl App {
         } else {
             self.album_state.select(None);
         }
+        *self.album_state.offset_mut() = 0;
         self.on_album_changed();
     }
 

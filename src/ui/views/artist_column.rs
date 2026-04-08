@@ -1,10 +1,13 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    widgets::{Block, Borders, List, ListItem, ListState, StatefulWidget},
+    widgets::{
+        Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, StatefulWidget,
+    },
 };
 
 use crate::ui::theme;
+use crate::ui::widgets::{draw_vscrollbar, render_list_independent};
 
 pub struct ArtistColumn<'a> {
     pub artists: &'a [String],
@@ -37,13 +40,26 @@ impl<'a> StatefulWidget for ArtistColumn<'a> {
                     .title(title)
                     .title_style(theme::title())
                     .borders(Borders::ALL)
-                    .border_style(border_style),
+                    .border_style(border_style)
+                    .padding(Padding::right(1)),
             )
             .highlight_style(
                 ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::BOLD),
             )
-            .highlight_symbol("> ");
+            .highlight_symbol("> ")
+            .highlight_spacing(HighlightSpacing::Always);
 
-        StatefulWidget::render(list, area, buf, state);
+        render_list_independent(list, area, buf, state);
+
+        if area.height > 2 && area.width >= 2 {
+            draw_vscrollbar(
+                buf,
+                Rect::new(area.x + area.width - 2, area.y + 1, 1, area.height - 2),
+                self.filtered_indices.len(),
+                (area.height - 2) as usize,
+                state.offset(),
+                self.focused,
+            );
+        }
     }
 }
