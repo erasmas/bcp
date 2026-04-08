@@ -573,6 +573,75 @@ impl App {
         self.selected_album_idx.and_then(|i| self.albums.get(i))
     }
 
+    /// Copy a link for the currently focused item to the system clipboard.
+    /// - Artists: artist's bandcamp page (derived from any album by them)
+    /// - Albums / Tracks: selected album's URL (Bandcamp doesn't expose
+    ///   per-track URLs in our model, so a track yank links to its album)
+    pub(crate) fn yank_current_link(&mut self) {
+        let (url, label) = match self.focus {
+            Column::Artists => {
+                let Some(album) = self
+                    .current_artist_album_indices()
+                    .first()
+                    .and_then(|&i| self.albums.get(i))
+                else {
+                    self.status_msg = "Nothing to yank".to_string();
+                    return;
+                };
+                // Strip the path: https://artist.bandcamp.com/album/foo -> https://artist.bandcamp.com
+                let base = album
+                    .item_url
+                    .split_once("//")
+                    .and_then(|(scheme, rest)| {
+                        rest.split_once('/')
+                            .map(|(host, _)| format!("{scheme}//{host}"))
+                    })
+                    .unwrap_or_else(|| album.item_url.clone());
+                (base, "artist link".to_string())
+            }
+            Column::Albums => {
+                let Some(album) = self.selected_album() else {
+                    self.status_msg = "Nothing to yank".to_string();
+                    return;
+                };
+                (album.item_url.clone(), "album link".to_string())
+            }
+            Column::Tracks => {
+                let Some(album_idx) = self.selected_album_idx else {
+                    self.status_msg = "Nothing to yank".to_string();
+                    return;
+                };
+                let album = &self.albums[album_idx];
+                let Some(track) = self
+                    .track_state
+                    .selected()
+                    .and_then(|i| self.track_filtered.get(i))
+                    .and_then(|&i| album.tracks.get(i))
+                else {
+                    self.status_msg = "Nothing to yank".to_string();
+                    return;
+                };
+
+                // Construct from artist origin + slugified title.
+                let origin = album
+                    .item_url
+                    .split_once("//")
+                    .and_then(|(scheme, rest)| {
+                        rest.split_once('/')
+                            .map(|(host, _)| format!("{scheme}//{host}"))
+                    })
+                    .unwrap_or_else(|| album.item_url.clone());
+                let url = format!("{}/track/{}", origin, slugify(&track.title));
+                (url, "track link".to_string())
+            }
+        };
+
+        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(url.clone())) {
+            Ok(()) => self.status_msg = format!("yanked {label}: {url}"),
+            Err(e) => self.status_msg = format!("yank failed: {e}"),
+        }
+    }
+
     // -- Filters --
 
     pub(crate) fn recompute_artist_filter(&mut self) {
@@ -675,4 +744,26 @@ impl App {
             });
         }
     }
+}
+
+/// Slugify a track title the way Bandcamp does for its `/track/<slug>` URLs.
+/// Lowercase, ASCII alphanumerics kept, everything else collapsed to single
+/// hyphens, with leading/trailing hyphens trimmed.
+fn slugify(title: &str) -> String {
+    let mut out = String::with_capacity(title.len());
+    let mut prev_dash = true;
+    for ch in title.chars() {
+        let lc = ch.to_ascii_lowercase();
+        if lc.is_ascii_alphanumeric() {
+            out.push(lc);
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
 }

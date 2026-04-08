@@ -87,6 +87,7 @@ impl App {
             KeyCode::Char('J') => Some(Message::ScrollMetaDown),
             KeyCode::Char('K') => Some(Message::ScrollMetaUp),
             KeyCode::Char('r') => Some(Message::Refresh),
+            KeyCode::Char('y') => Some(Message::Yank),
             KeyCode::Char('/') => Some(Message::StartFilter),
             _ => None,
         }

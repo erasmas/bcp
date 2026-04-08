@@ -6,6 +6,7 @@ description = "A terminal music player for your Bandcamp collection"
 
 [dependencies]
 anyhow = "1"
+arboard = { version = "3", default-features = false }
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.29"
 dirs = "6"

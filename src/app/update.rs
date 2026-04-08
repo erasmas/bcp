@@ -38,6 +38,7 @@ impl Message {
             // UI
             Self::ToggleSettings => Some(("?", "info")),
             Self::Refresh => Some(("r", "refresh")),
+            Self::Yank => Some(("y", "yank link")),
             // Internal (login, async results)
             Self::OpenLogin | Self::ExtractCookie => None,
             Self::AlbumDetailLoaded { .. } | Self::AlbumDetailFailed(_) => None,
@@ -71,6 +72,7 @@ impl Message {
             Message::Download,
             Message::DownloadAll,
             Message::Refresh,
+            Message::Yank,
             Message::ToggleSettings,
             Message::Quit,
         ]
@@ -115,6 +117,7 @@ pub enum Message {
     // UI
     ToggleSettings,
     Refresh,
+    Yank,
     // Login
     OpenLogin,
     ExtractCookie,
@@ -390,6 +393,9 @@ impl App {
                 self.albums.clear();
                 self.screen = AppScreen::Loading;
                 self.status_msg = "Refreshing collection...".to_string();
+            }
+            Message::Yank => {
+                self.yank_current_link();
             }
 
             // -- Login --
