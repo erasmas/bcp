@@ -108,9 +108,8 @@ impl App {
     fn draw_main(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
-        let np_height = NowPlayingBar::ideal_height(area.width);
         let chunks = Layout::vertical([
-            Constraint::Length(np_height),
+            Constraint::Percentage(30),
             Constraint::Min(10),
             Constraint::Length(1),
         ])
@@ -138,9 +137,9 @@ impl App {
 
         // Three-column layout
         let columns = Layout::horizontal([
-            Constraint::Percentage(25),
-            Constraint::Percentage(35),
-            Constraint::Percentage(40),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
         ])
         .split(chunks[1]);
         self.artist_rect = columns[0];

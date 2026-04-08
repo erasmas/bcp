@@ -22,18 +22,6 @@ pub struct NowPlayingBar<'a> {
 }
 
 impl<'a> NowPlayingBar<'a> {
-    /// Compute the ideal height for the now-playing section based on album art size.
-    /// Art is ART_PERCENT% of terminal width; square cover needs height = width/2.
-    /// Add 2 for borders.
-    pub fn ideal_height(terminal_width: u16) -> u16 {
-        let inner_width = terminal_width.saturating_sub(2); // borders
-        let art_cols = inner_width * ART_PERCENT / 100;
-        // Square cover in terminal: height ≈ width * 0.38 (empirical, accounts
-        // for actual cell aspect ratio)
-        let art_rows = (art_cols as f64 * 0.38) as u16;
-        art_rows + 2 // add borders
-    }
-
     /// Returns the Rect where album art should be rendered, vertically centered.
     pub fn art_area(outer: Rect) -> Rect {
         let block = Block::default().borders(Borders::ALL);
