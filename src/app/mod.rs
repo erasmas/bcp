@@ -7,10 +7,10 @@ pub use update::Message;
 
 use anyhow::Result;
 use ratatui::layout::Rect;
-use serde::{Deserialize, Serialize};
 use ratatui::widgets::ListState;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
 

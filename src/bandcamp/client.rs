@@ -195,9 +195,10 @@ fn parse_album_page(html: &str) -> Result<AlbumDetail> {
             // TODO: Bandcamp only embeds mp3-128 in page JSON even for purchased music.
             // Higher quality streams (mp3-v0 etc.) require a separate authenticated API
             // endpoint that the official app uses but isn't publicly documented.
-            let stream_url = t.file.as_ref().and_then(|f| {
-                f.get("mp3-v0").or_else(|| f.get("mp3-128")).cloned()
-            });
+            let stream_url = t
+                .file
+                .as_ref()
+                .and_then(|f| f.get("mp3-v0").or_else(|| f.get("mp3-128")).cloned());
 
             Track {
                 title: t.title.unwrap_or_else(|| "Untitled".to_string()),

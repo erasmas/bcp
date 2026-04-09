@@ -116,12 +116,7 @@ fn render_playing(
     ]);
     buf.set_line(area.x, area.y, &title_line, title_width);
     if label_width > 0 {
-        buf.set_string(
-            area.x + title_width,
-            area.y,
-            &format_label,
-            theme::dim(),
-        );
+        buf.set_string(area.x + title_width, area.y, &format_label, theme::dim());
     }
 
     // Line 2: thin progress line

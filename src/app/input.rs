@@ -71,10 +71,18 @@ impl App {
                     Some(Message::FocusLeft)
                 }
             }
-            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Message::PageDown),
-            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Message::PageUp),
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Message::HalfPageDown),
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Message::HalfPageUp),
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Message::PageDown)
+            }
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Message::PageUp)
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Message::HalfPageDown)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Message::HalfPageUp)
+            }
             KeyCode::Char('h') | KeyCode::Left => Some(Message::FocusLeft),
             KeyCode::Char('l') | KeyCode::Right => Some(Message::FocusRight),
             KeyCode::Char('?') => Some(Message::ToggleSettings),

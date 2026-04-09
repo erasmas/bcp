@@ -51,7 +51,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Login { cookie: Some(cookie) }) => {
+        Some(Commands::Login {
+            cookie: Some(cookie),
+        }) => {
             let auth_data = bandcamp::models::AuthData {
                 identity_cookie: cookie,
                 fan_id: None,
@@ -176,10 +178,10 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
 
         // Restore persisted state (selections, queue, last track) now that
         // the collection is loaded and the artist index is ready.
-        if app.screen == app::AppScreen::Main {
-            if let Ok(Some(saved)) = state::load_state() {
-                app.restore_state(saved);
-            }
+        if app.screen == app::AppScreen::Main
+            && let Ok(Some(saved)) = state::load_state()
+        {
+            app.restore_state(saved);
         }
     }
 
