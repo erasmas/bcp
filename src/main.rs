@@ -51,7 +51,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Login { cookie: Some(cookie) }) => {
+        Some(Commands::Login {
+            cookie: Some(cookie),
+        }) => {
             let auth_data = bandcamp::models::AuthData {
                 identity_cookie: cookie,
                 fan_id: None,

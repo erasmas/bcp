@@ -17,9 +17,10 @@ fn parse_mp3_bitrate(data: &[u8]) -> Option<String> {
     };
 
     // Find first frame sync (0xFF followed by 0xEx or 0xFx)
-    let frame_start = data[start..].windows(2).position(|w| {
-        w[0] == 0xFF && (w[1] & 0xE0) == 0xE0
-    })? + start;
+    let frame_start = data[start..]
+        .windows(2)
+        .position(|w| w[0] == 0xFF && (w[1] & 0xE0) == 0xE0)?
+        + start;
 
     if frame_start + 4 > data.len() {
         return None;
@@ -35,7 +36,9 @@ fn parse_mp3_bitrate(data: &[u8]) -> Option<String> {
     }
 
     let bitrate_idx = (h2 >> 4) as usize;
-    let bitrates = [0u32, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+    let bitrates = [
+        0u32, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+    ];
     let bitrate = *bitrates.get(bitrate_idx)?;
     if bitrate == 0 {
         return None;
