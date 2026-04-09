@@ -1,6 +1,57 @@
 use anyhow::Result;
 
 use super::{App, AppScreen, Column, LoginStep};
+
+/// Parse the bitrate from the first MP3 frame header.
+/// Returns e.g. "128 kbps" for CBR or "VBR" for variable-bitrate files.
+fn parse_mp3_bitrate(data: &[u8]) -> Option<String> {
+    // Skip ID3v2 tag if present
+    let start = if data.starts_with(b"ID3") && data.len() >= 10 {
+        let size = ((data[6] as usize) << 21)
+            | ((data[7] as usize) << 14)
+            | ((data[8] as usize) << 7)
+            | (data[9] as usize);
+        10 + size
+    } else {
+        0
+    };
+
+    // Find first frame sync (0xFF followed by 0xEx or 0xFx)
+    let frame_start = data[start..].windows(2).position(|w| {
+        w[0] == 0xFF && (w[1] & 0xE0) == 0xE0
+    })? + start;
+
+    if frame_start + 4 > data.len() {
+        return None;
+    }
+
+    let h1 = data[frame_start + 1];
+    let h2 = data[frame_start + 2];
+    let h3 = data[frame_start + 3];
+
+    // Only handle MPEG1 (bits 4-3 of h1 = 11), Layer 3 (bits 2-1 of h1 = 01)
+    if (h1 & 0x18) != 0x18 || (h1 & 0x06) != 0x02 {
+        return None;
+    }
+
+    let bitrate_idx = (h2 >> 4) as usize;
+    let bitrates = [0u32, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+    let bitrate = *bitrates.get(bitrate_idx)?;
+    if bitrate == 0 {
+        return None;
+    }
+
+    // Check for Xing VBR header: located after the frame header + side info
+    // Side info: 32 bytes for stereo (channel_mode != 3), 17 bytes for mono
+    let is_mono = (h3 >> 6) == 3;
+    let side_info_size = if is_mono { 17 } else { 32 };
+    let xing_offset = frame_start + 4 + side_info_size;
+    if xing_offset + 4 <= data.len() && &data[xing_offset..xing_offset + 4] == b"Xing" {
+        return Some("VBR".to_string());
+    }
+
+    Some(format!("{} kbps", bitrate))
+}
 use crate::bandcamp::client::{AlbumDetail, BandcampClient};
 use crate::bandcamp::models::AuthData;
 use crate::player::queue::QueueItem;
@@ -522,6 +573,7 @@ impl App {
 
             Message::Mp3Ready(data) => {
                 if let Some(ref engine) = self.engine {
+                    self.stream_bitrate = parse_mp3_bitrate(&data);
                     engine.play(data)?;
                     self.is_paused = false;
                     self.play_started = Some(std::time::Instant::now());

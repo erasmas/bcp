@@ -19,6 +19,7 @@ pub struct NowPlayingBar<'a> {
     pub elapsed: f64,
     pub has_art: bool,
     pub meta_scroll: usize,
+    pub stream_bitrate: Option<&'a str>,
 }
 
 impl<'a> NowPlayingBar<'a> {
@@ -69,6 +70,7 @@ impl<'a> Widget for NowPlayingBar<'a> {
                     self.is_paused,
                     self.elapsed,
                     self.meta_scroll,
+                    self.stream_bitrate,
                 );
             }
             None => {
@@ -85,6 +87,7 @@ fn render_playing(
     is_paused: bool,
     elapsed: f64,
     meta_scroll: usize,
+    stream_bitrate: Option<&str>,
 ) {
     if area.width < 5 || area.height < 1 {
         return;
@@ -98,7 +101,12 @@ fn render_playing(
         format_duration(duration)
     );
 
-    // Line 1: icon + artist - track title + time
+    // Line 1: icon + artist - track title + time, bitrate right-aligned
+    let format_label = stream_bitrate
+        .map(|b| format!(" {} ", b))
+        .unwrap_or_default();
+    let label_width = format_label.len() as u16;
+    let title_width = area.width.saturating_sub(label_width);
     let title_line = Line::from(vec![
         Span::styled(format!(" {} ", icon), theme::playing()),
         Span::styled(&item.artist_name, theme::normal()),
@@ -106,7 +114,15 @@ fn render_playing(
         Span::styled(&item.track.title, theme::normal()),
         Span::styled(format!("  {}", time_str), theme::dim()),
     ]);
-    buf.set_line(area.x, area.y, &title_line, area.width);
+    buf.set_line(area.x, area.y, &title_line, title_width);
+    if label_width > 0 {
+        buf.set_string(
+            area.x + title_width,
+            area.y,
+            &format_label,
+            theme::dim(),
+        );
+    }
 
     // Line 2: thin progress line
     if area.height > 1 {
