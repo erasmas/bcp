@@ -123,6 +123,7 @@ impl App {
             elapsed: self.elapsed,
             has_art,
             meta_scroll: self.meta_scroll,
+            stream_bitrate: self.stream_bitrate.as_deref(),
         };
         let np_area = chunks[0];
         self.np_rect = np_area;
