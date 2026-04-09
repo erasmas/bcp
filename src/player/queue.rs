@@ -1,6 +1,7 @@
 use crate::bandcamp::models::Track;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueItem {
     pub track: Track,
     pub item_id: u64,

@@ -153,7 +153,10 @@ impl App {
     pub async fn update(&mut self, msg: Message) -> Result<()> {
         match msg {
             // -- Navigation --
-            Message::Quit => self.should_quit = true,
+            Message::Quit => {
+                self.persist_state();
+                self.should_quit = true;
+            }
 
             Message::FocusLeft => {
                 if !self.filter_text.is_empty() {

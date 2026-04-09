@@ -7,6 +7,7 @@ pub use update::Message;
 
 use anyhow::Result;
 use ratatui::layout::Rect;
+use serde::{Deserialize, Serialize};
 use ratatui::widgets::ListState;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
@@ -21,7 +22,7 @@ use crate::player::engine::{AudioEngine, PlayerEvent};
 use crate::player::queue::PlayQueue;
 use crate::{auth, cache};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Column {
     Artists,
     Albums,
@@ -711,6 +712,65 @@ impl App {
                 self.on_album_changed();
             }
             Column::Tracks => self.recompute_track_filter(),
+        }
+    }
+
+    // -- State persistence --
+
+    /// Capture current app state for persistence.
+    pub fn persist_state(&self) {
+        let state = crate::state::AppState {
+            queue_items: self.queue.items.clone(),
+            queue_current: self.queue.current,
+            is_paused: self.is_paused,
+            elapsed: self.elapsed,
+            focus: self.focus,
+            artist_selected: self.artist_state.selected(),
+            artist_offset: self.artist_state.offset(),
+            album_selected: self.album_state.selected(),
+            album_offset: self.album_state.offset(),
+            track_selected: self.track_state.selected(),
+            track_offset: self.track_state.offset(),
+            meta_scroll: self.meta_scroll,
+        };
+        let _ = crate::state::save_state(&state);
+    }
+
+    /// Restore a previously persisted state. Assumes the collection is already loaded.
+    pub fn restore_state(&mut self, state: crate::state::AppState) {
+        // Restore UI selections in cascade order so dependent state (album/track
+        // filter lists, selected_album_idx) is correctly rebuilt at each step.
+        if let Some(sel) = state.artist_selected {
+            self.artist_state.select(Some(sel));
+        }
+        self.on_artist_changed();
+
+        if let Some(sel) = state.album_selected {
+            self.album_state.select(Some(sel));
+        }
+        self.on_album_changed();
+
+        if let Some(sel) = state.track_selected {
+            self.track_state.select(Some(sel));
+        }
+
+        // Restore scroll offsets after the cascade (on_artist_changed resets album offset to 0).
+        *self.artist_state.offset_mut() = state.artist_offset;
+        *self.album_state.offset_mut() = state.album_offset;
+        *self.track_state.offset_mut() = state.track_offset;
+
+        self.focus = state.focus;
+        self.meta_scroll = state.meta_scroll;
+
+        // Restore playback: restart the last track from the beginning.
+        // The previously elapsed position was state.elapsed seconds, but seeking
+        // is not available in rodio 0.20 — playback will resume from the start.
+        // Upgrade to a version of rodio that exposes Sink::try_seek() to
+        // implement full position restoration.
+        if !state.queue_items.is_empty() {
+            self.queue.items = state.queue_items;
+            self.queue.current = state.queue_current;
+            self.start_playback();
         }
     }
 

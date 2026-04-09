@@ -6,6 +6,7 @@ mod config;
 mod events;
 mod library;
 mod player;
+mod state;
 mod ui;
 
 use anyhow::Result;
@@ -172,6 +173,14 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
             }
         }
         terminal.draw(|f| app.draw(f))?;
+
+        // Restore persisted state (selections, queue, last track) now that
+        // the collection is loaded and the artist index is ready.
+        if app.screen == app::AppScreen::Main {
+            if let Ok(Some(saved)) = state::load_state() {
+                app.restore_state(saved);
+            }
+        }
     }
 
     loop {
