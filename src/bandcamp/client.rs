@@ -192,7 +192,9 @@ fn parse_album_page(html: &str) -> Result<AlbumDetail> {
         .unwrap_or_default()
         .into_iter()
         .map(|t| {
-            let stream_url = t.file.as_ref().and_then(|f| f.get("mp3-128").cloned());
+            let stream_url = t.file.as_ref().and_then(|f| {
+                f.get("mp3-v0").or_else(|| f.get("mp3-128")).cloned()
+            });
 
             Track {
                 title: t.title.unwrap_or_else(|| "Untitled".to_string()),
