@@ -36,7 +36,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Log in to Bandcamp (opens browser)
-    Login,
+    Login {
+        /// Value of the 'identity' cookie from bandcamp.com (DevTools → Application → Cookies)
+        #[arg(long)]
+        cookie: Option<String>,
+    },
     /// Clear stored authentication
     Logout,
 }
@@ -46,7 +50,17 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Login) => {
+        Some(Commands::Login { cookie: Some(cookie) }) => {
+            let auth_data = bandcamp::models::AuthData {
+                identity_cookie: cookie,
+                fan_id: None,
+                username: None,
+            };
+            auth::save_auth(&auth_data)?;
+            println!("Authenticated! Run `bcp` to start the player.");
+            return Ok(());
+        }
+        Some(Commands::Login { cookie: None }) => {
             println!("Opening Bandcamp login in your browser...");
             auth::open_login_page()?;
             println!("Log in to Bandcamp, then press Enter here.");
