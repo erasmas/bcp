@@ -21,6 +21,10 @@ impl Message {
             Self::MoveDown => Some(("j / \u{2193}", "down")),
             Self::MoveToTop => Some(("g", "top")),
             Self::MoveToBottom => Some(("G", "bottom")),
+            Self::PageDown => Some(("PgDn / ^F", "page down")),
+            Self::PageUp => Some(("PgUp / ^B", "page up")),
+            Self::HalfPageDown => Some(("^D", "half page down")),
+            Self::HalfPageUp => Some(("^U", "half page up")),
             Self::Enter => Some(("Enter", "open/play")),
             // Playback
             Self::TogglePause => Some(("Space", "pause")),
@@ -61,6 +65,10 @@ impl Message {
             Message::MoveDown,
             Message::MoveToTop,
             Message::MoveToBottom,
+            Message::PageDown,
+            Message::PageUp,
+            Message::HalfPageDown,
+            Message::HalfPageUp,
             Message::Enter,
             Message::CancelFilter,
             Message::StartFilter,
@@ -94,6 +102,10 @@ pub enum Message {
     MoveDown,
     MoveToTop,
     MoveToBottom,
+    PageDown,
+    PageUp,
+    HalfPageDown,
+    HalfPageUp,
     Enter,
 
     // Playback
@@ -303,6 +315,30 @@ impl App {
                         Column::Tracks => self.track_state.select(Some(len - 1)),
                     }
                 }
+                self.on_selection_moved();
+            }
+
+            Message::PageDown => {
+                let page = self.focus_page_size();
+                self.move_selection(page as i32);
+                self.on_selection_moved();
+            }
+
+            Message::PageUp => {
+                let page = self.focus_page_size();
+                self.move_selection(-(page as i32));
+                self.on_selection_moved();
+            }
+
+            Message::HalfPageDown => {
+                let half = (self.focus_page_size() / 2).max(1);
+                self.move_selection(half as i32);
+                self.on_selection_moved();
+            }
+
+            Message::HalfPageUp => {
+                let half = (self.focus_page_size() / 2).max(1);
+                self.move_selection(-(half as i32));
                 self.on_selection_moved();
             }
 
@@ -576,6 +612,19 @@ impl App {
     }
 
     // -- Helper methods used by update --
+
+    fn focus_page_size(&self) -> usize {
+        let rect = match self.focus {
+            Column::Artists => self.artist_rect,
+            Column::Albums => self.album_rect,
+            Column::Tracks => self.track_rect,
+        };
+        if rect.height < 3 {
+            1
+        } else {
+            (rect.height - 2) as usize
+        }
+    }
 
     fn move_selection(&mut self, delta: i32) {
         let (state, len) = match self.focus {
