@@ -98,6 +98,8 @@ impl App {
             KeyCode::Char(' ') => Some(Message::TogglePause),
             KeyCode::Char('n') => Some(Message::NextTrack),
             KeyCode::Char('p') => Some(Message::PrevTrack),
+            KeyCode::Char('[') => Some(Message::SeekBackward),
+            KeyCode::Char(']') => Some(Message::SeekForward),
             KeyCode::Char('J') => Some(Message::ScrollMetaDown),
             KeyCode::Char('K') => Some(Message::ScrollMetaUp),
             KeyCode::Char('r') => Some(Message::Refresh),

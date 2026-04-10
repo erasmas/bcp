@@ -121,6 +121,33 @@ impl App {
         }
     }
 
+    pub(crate) fn seek_by(&mut self, delta: f64) {
+        let Some(ref engine) = self.engine else {
+            return;
+        };
+        let Some(item) = self.queue.current_item() else {
+            return;
+        };
+        if self.play_started.is_none() {
+            return;
+        };
+
+        let duration = item.track.duration;
+        let new_pos = (self.elapsed + delta).clamp(0.0, duration);
+        if engine
+            .seek(std::time::Duration::from_secs_f64(new_pos))
+            .is_ok()
+        {
+            // Adjust play_started so elapsed reads new_pos going forward
+            self.play_started = Some(
+                std::time::Instant::now()
+                    - std::time::Duration::from_secs_f64(new_pos + self.pause_accumulated),
+            );
+            self.elapsed = new_pos;
+            self.dirty = true;
+        }
+    }
+
     pub(crate) fn toggle_pause(&mut self) -> Result<()> {
         if let Some(ref engine) = self.engine {
             if self.is_paused {
