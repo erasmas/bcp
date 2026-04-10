@@ -124,6 +124,7 @@ pub struct App {
     pub(crate) mp3_rx: Option<tokio::sync::oneshot::Receiver<Result<Vec<u8>>>>,
     pub(crate) art_rx: Option<tokio::sync::oneshot::Receiver<Option<image::DynamicImage>>>,
     pub(crate) engine: Option<AudioEngine>,
+    pub(crate) pending_seek: Option<f64>,
     pub(crate) client: Option<BandcampClient>,
     // Cached rects for mouse hit-testing, refreshed each draw.
     pub(crate) artist_rect: Rect,
@@ -176,6 +177,7 @@ impl App {
             mp3_rx: None,
             art_rx: None,
             engine: None,
+            pending_seek: None,
             client: None,
             artist_rect: Rect::ZERO,
             album_rect: Rect::ZERO,
@@ -764,14 +766,12 @@ impl App {
         self.focus = state.focus;
         self.meta_scroll = state.meta_scroll;
 
-        // Restore playback: restart the last track from the beginning.
-        // The previously elapsed position was state.elapsed seconds, but seeking
-        // is not available in rodio 0.20 — playback will resume from the start.
-        // Upgrade to a version of rodio that exposes Sink::try_seek() to
-        // implement full position restoration.
         if !state.queue_items.is_empty() {
             self.queue.items = state.queue_items;
             self.queue.current = state.queue_current;
+            if state.elapsed > 0.0 {
+                self.pending_seek = Some(state.elapsed);
+            }
             self.start_playback();
         }
     }

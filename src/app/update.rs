@@ -633,6 +633,9 @@ impl App {
                     self.status_msg = String::new();
                     self.dirty = true;
                 }
+                if let Some(pos) = self.pending_seek.take() {
+                    self.seek_by(pos);
+                }
             }
             Message::Mp3Failed(e) => {
                 self.status_msg = format!("Stream error: {}", e);
