@@ -8,6 +8,7 @@ pub enum PlayerCommand {
     Play(Vec<u8>),
     Pause,
     Resume,
+    Seek(std::time::Duration),
     Shutdown,
 }
 
@@ -54,6 +55,11 @@ impl AudioEngine {
 
     pub fn resume(&self) -> Result<()> {
         self.cmd_tx.send(PlayerCommand::Resume)?;
+        Ok(())
+    }
+
+    pub fn seek(&self, pos: std::time::Duration) -> Result<()> {
+        self.cmd_tx.send(PlayerCommand::Seek(pos))?;
         Ok(())
     }
 }
@@ -112,6 +118,11 @@ fn audio_thread(
                     if let Some(ref sink) = current_sink {
                         sink.play();
                         let _ = event_tx.send(PlayerEvent::Resumed);
+                    }
+                }
+                PlayerCommand::Seek(pos) => {
+                    if let Some(ref sink) = current_sink {
+                        let _ = sink.try_seek(pos);
                     }
                 }
                 PlayerCommand::Shutdown => {

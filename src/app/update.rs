@@ -84,6 +84,8 @@ impl Message {
             Self::TogglePause => Some(("Space", "pause")),
             Self::NextTrack => Some(("n", "next track")),
             Self::PrevTrack => Some(("p", "prev track")),
+            Self::SeekBackward => Some(("[", "seek -10s")),
+            Self::SeekForward => Some(("]", "seek +10s")),
             Self::ScrollMetaDown => Some(("J", "scroll meta down")),
             Self::ScrollMetaUp => Some(("K", "scroll meta up")),
             // Filter
@@ -129,6 +131,8 @@ impl Message {
             Message::TogglePause,
             Message::NextTrack,
             Message::PrevTrack,
+            Message::SeekBackward,
+            Message::SeekForward,
             Message::ScrollMetaDown,
             Message::ScrollMetaUp,
             Message::Download,
@@ -166,6 +170,8 @@ pub enum Message {
     TogglePause,
     NextTrack,
     PrevTrack,
+    SeekBackward,
+    SeekForward,
     ScrollMetaDown,
     ScrollMetaUp,
 
@@ -437,6 +443,8 @@ impl App {
             }
             Message::NextTrack => self.play_next(),
             Message::PrevTrack => self.play_prev(),
+            Message::SeekBackward => self.seek_by(-10.0),
+            Message::SeekForward => self.seek_by(10.0),
 
             Message::ScrollMetaDown => {
                 self.meta_scroll += 1;
