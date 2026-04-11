@@ -139,10 +139,8 @@ impl App {
             .is_ok()
         {
             // Adjust play_started so elapsed reads new_pos going forward
-            self.play_started = Some(
-                std::time::Instant::now()
-                    - std::time::Duration::from_secs_f64(new_pos + self.pause_accumulated),
-            );
+            self.play_started =
+                Some(std::time::Instant::now() - std::time::Duration::from_secs_f64(new_pos));
             self.elapsed = new_pos;
             self.dirty = true;
         }
@@ -153,6 +151,10 @@ impl App {
             if self.is_paused {
                 engine.resume()?;
                 self.is_paused = false;
+                // Rebase play_started so elapsed resumes from where it was frozen.
+                self.play_started = Some(
+                    std::time::Instant::now() - std::time::Duration::from_secs_f64(self.elapsed),
+                );
             } else {
                 engine.pause()?;
                 self.is_paused = true;

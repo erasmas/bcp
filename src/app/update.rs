@@ -716,7 +716,6 @@ impl App {
                     engine.play(data)?;
                     self.is_paused = false;
                     self.play_started = Some(std::time::Instant::now());
-                    self.pause_accumulated = 0.0;
                     self.elapsed = 0.0;
                     self.meta_scroll = 0;
                     self.status_msg = String::new();
@@ -724,6 +723,9 @@ impl App {
                 }
                 if let Some(pos) = self.pending_seek.take() {
                     self.seek_by(pos);
+                }
+                if std::mem::take(&mut self.pending_pause) {
+                    let _ = self.toggle_pause();
                 }
             }
             Message::Mp3Failed(e) => {

@@ -111,8 +111,10 @@ pub struct App {
     pub stream_bitrate: Option<String>,
     pub meta_scroll: usize,
     pub elapsed: f64,
+    /// Instant the current track began playing, shifted forward by any pause
+    /// duration on resume so that `play_started.elapsed()` always reflects real
+    /// playback time.
     pub play_started: Option<Instant>,
-    pub pause_accumulated: f64,
     pub filter_text: String,
     pub artist_filtered: Vec<usize>,
     pub album_filtered: Vec<usize>,
@@ -134,6 +136,7 @@ pub struct App {
     pub(crate) art_rx: Option<tokio::sync::oneshot::Receiver<Option<image::DynamicImage>>>,
     pub(crate) engine: Option<AudioEngine>,
     pub(crate) pending_seek: Option<f64>,
+    pub(crate) pending_pause: bool,
     pub(crate) client: Option<BandcampClient>,
     // Cached rects for mouse hit-testing, refreshed each draw.
     pub(crate) artist_rect: Rect,
@@ -167,7 +170,6 @@ impl App {
             meta_scroll: 0,
             elapsed: 0.0,
             play_started: None,
-            pause_accumulated: 0.0,
             filter_text: String::new(),
             artist_filtered: Vec::new(),
             album_filtered: Vec::new(),
@@ -189,6 +191,7 @@ impl App {
             art_rx: None,
             engine: None,
             pending_seek: None,
+            pending_pause: false,
             client: None,
             artist_rect: Rect::ZERO,
             album_rect: Rect::ZERO,
@@ -293,7 +296,7 @@ impl App {
         if let Some(started) = self.play_started
             && !self.is_paused
         {
-            let new_elapsed = started.elapsed().as_secs_f64() - self.pause_accumulated;
+            let new_elapsed = started.elapsed().as_secs_f64();
             if (new_elapsed - self.elapsed).abs() > 0.1 {
                 self.elapsed = new_elapsed;
                 self.dirty = true;
@@ -793,6 +796,7 @@ impl App {
             if state.elapsed > 0.0 {
                 self.pending_seek = Some(state.elapsed);
             }
+            self.pending_pause = state.is_paused;
             self.start_playback();
         }
 
