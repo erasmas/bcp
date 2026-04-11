@@ -103,8 +103,8 @@ impl Message {
             Self::HalfPageDown => Some(("^D", "half page down")),
             Self::HalfPageUp => Some(("^U", "half page up")),
             Self::Enter => Some(("Enter", "open/play")),
-            Self::AppendToQueue => Some(("Shift+Enter", "append to queue")),
-            Self::InsertNext => Some(("Ctrl+Enter", "play next")),
+            Self::AppendToQueue => Some(("Alt+Enter / a", "append to queue")),
+            Self::InsertNext => Some(("Ctrl+Enter / A", "play next")),
             // Playback
             Self::TogglePause => Some(("Space", "pause")),
             Self::NextTrack => Some(("n", "next track")),

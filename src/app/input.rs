@@ -86,6 +86,8 @@ impl App {
             KeyCode::Char('h') | KeyCode::Left => Some(Message::FocusLeft),
             KeyCode::Char('l') | KeyCode::Right => Some(Message::FocusRight),
             KeyCode::Char('?') => Some(Message::ToggleSettings),
+            KeyCode::Char('a') => Some(Message::AppendToQueue),
+            KeyCode::Char('A') => Some(Message::InsertNext),
             KeyCode::Char('d') => Some(Message::Download),
             KeyCode::Char('D') => Some(Message::DownloadAll),
             KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
@@ -97,7 +99,7 @@ impl App {
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(Message::InsertNext)
             }
-            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
                 Some(Message::AppendToQueue)
             }
             KeyCode::Enter => Some(Message::Enter),
