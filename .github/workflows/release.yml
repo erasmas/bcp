@@ -92,10 +92,19 @@ jobs:
           echo "macos_sha=$macos_sha" >> "$GITHUB_OUTPUT"
           echo "linux_sha=$linux_sha" >> "$GITHUB_OUTPUT"
 
+      - name: Generate tap token
+        id: tap-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.TAP_APP_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: erasmas
+          repositories: homebrew-bcp
+
       - name: Update Homebrew formula
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          github-token: ${{ steps.tap-token.outputs.token }}
           script: |
             const version = '${{ steps.shas.outputs.version }}';
             const macosSha = '${{ steps.shas.outputs.macos_sha }}';
