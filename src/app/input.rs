@@ -87,6 +87,8 @@ impl App {
             KeyCode::Char('h') | KeyCode::Left => Some(Message::FocusLeft),
             KeyCode::Char('l') | KeyCode::Right => Some(Message::FocusRight),
             KeyCode::Char('?') => Some(Message::ToggleSettings),
+            KeyCode::Char('a') => Some(Message::AppendToQueue),
+            KeyCode::Char('A') => Some(Message::InsertNext),
             KeyCode::Char('d') => Some(Message::Download),
             KeyCode::Char('D') => Some(Message::DownloadAll),
             KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
@@ -95,6 +97,12 @@ impl App {
             KeyCode::Char('G') => Some(Message::MoveToBottom),
             KeyCode::PageDown => Some(Message::PageDown),
             KeyCode::PageUp => Some(Message::PageUp),
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Message::InsertNext)
+            }
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+                Some(Message::AppendToQueue)
+            }
             KeyCode::Enter => Some(Message::Enter),
             KeyCode::Char(' ') => Some(Message::TogglePause),
             KeyCode::Char('n') => Some(Message::NextTrack),
@@ -137,6 +145,8 @@ impl App {
             Some((Column::Albums, self.album_rect))
         } else if rect_contains(self.track_rect, x, y) {
             Some((Column::Tracks, self.track_rect))
+        } else if rect_contains(self.queue_rect, x, y) {
+            Some((Column::Queue, self.queue_rect))
         } else {
             None
         };
@@ -156,12 +166,14 @@ impl App {
                             Column::Artists => self.artist_state.offset(),
                             Column::Albums => self.album_state.offset(),
                             Column::Tracks => self.track_state.offset(),
+                            Column::Queue => self.queue_state.offset(),
                         };
                         let idx = offset + visible_row;
                         let len = match col {
                             Column::Artists => self.artist_filtered.len(),
                             Column::Albums => self.album_filtered.len(),
                             Column::Tracks => self.track_filtered.len(),
+                            Column::Queue => self.queue.items.len(),
                         };
                         if idx < len {
                             return vec![Message::SelectAt(col, idx)];

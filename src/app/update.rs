@@ -1,6 +1,29 @@
 use anyhow::Result;
 
 use super::{App, AppMode, AppScreen, Column, LoginStep};
+use crate::bandcamp::models::Album;
+
+enum QueueOp {
+    Append,
+    InsertNext,
+}
+
+fn album_queue_items(album: &Album) -> Vec<QueueItem> {
+    album
+        .tracks
+        .iter()
+        .map(|t| QueueItem {
+            track: t.clone(),
+            item_id: album.item_id,
+            album_title: album.album_title.clone(),
+            artist_name: album.artist_name.clone(),
+            art_url: album.art_url.clone(),
+            about: album.about.clone(),
+            credits: album.credits.clone(),
+            release_date: album.release_date.clone(),
+        })
+        .collect()
+}
 
 /// Parse the bitrate from the first MP3 frame header.
 /// Returns e.g. "128 kbps" for CBR or "VBR" for variable-bitrate files.
@@ -80,6 +103,8 @@ impl Message {
             Self::HalfPageDown => Some(("^D", "half page down")),
             Self::HalfPageUp => Some(("^U", "half page up")),
             Self::Enter => Some(("Enter", "open/play")),
+            Self::AppendToQueue => Some(("Alt+Enter / a", "append to queue")),
+            Self::InsertNext => Some(("Ctrl+Enter / A", "play next")),
             // Playback
             Self::TogglePause => Some(("Space", "pause")),
             Self::NextTrack => Some(("n", "next track")),
@@ -166,6 +191,8 @@ pub enum Message {
     HalfPageDown,
     HalfPageUp,
     Enter,
+    AppendToQueue,
+    InsertNext,
 
     // Playback
     TogglePause,
@@ -225,12 +252,17 @@ impl App {
                     self.filter_text.clear();
                 }
                 match self.focus {
+                    Column::Queue => {
+                        self.focus = Column::Tracks;
+                        self.recompute_active_filter();
+                    }
                     Column::Tracks => {
                         self.focus = Column::Albums;
                         self.recompute_active_filter();
                     }
                     Column::Albums => {
                         self.focus = Column::Artists;
+                        self.queue_visible = false;
                         self.recompute_active_filter();
                     }
                     Column::Artists => {}
@@ -261,7 +293,17 @@ impl App {
                             self.recompute_active_filter();
                         }
                     }
-                    Column::Tracks => {}
+                    Column::Tracks => {
+                        if !self.queue.items.is_empty() {
+                            if self.queue_state.selected().is_none() {
+                                self.queue_state
+                                    .select(Some(self.queue.current.unwrap_or(0)));
+                            }
+                            self.queue_visible = true;
+                            self.focus = Column::Queue;
+                        }
+                    }
+                    Column::Queue => {}
                 }
             }
 
@@ -274,6 +316,7 @@ impl App {
                     match col {
                         Column::Artists => {
                             self.focus = Column::Artists;
+                            self.queue_visible = false;
                             self.recompute_active_filter();
                         }
                         Column::Albums => {
@@ -293,6 +336,16 @@ impl App {
                                 }
                                 self.focus = Column::Tracks;
                                 self.recompute_active_filter();
+                            }
+                        }
+                        Column::Queue => {
+                            if !self.queue.items.is_empty() {
+                                if self.queue_state.selected().is_none() {
+                                    self.queue_state
+                                        .select(Some(self.queue.current.unwrap_or(0)));
+                                }
+                                self.queue_visible = true;
+                                self.focus = Column::Queue;
                             }
                         }
                     }
@@ -316,6 +369,11 @@ impl App {
                         self.track_rect,
                         &mut self.track_state,
                     ),
+                    Column::Queue => (
+                        self.queue.items.len(),
+                        self.queue_rect,
+                        &mut self.queue_state,
+                    ),
                 };
                 if len == 0 || rect.height < 3 {
                     return Ok(());
@@ -332,12 +390,14 @@ impl App {
                     Column::Artists => self.artist_filtered.len(),
                     Column::Albums => self.album_filtered.len(),
                     Column::Tracks => self.track_filtered.len(),
+                    Column::Queue => self.queue.items.len(),
                 };
                 if idx < len {
                     match col {
                         Column::Artists => self.artist_state.select(Some(idx)),
                         Column::Albums => self.album_state.select(Some(idx)),
                         Column::Tracks => self.track_state.select(Some(idx)),
+                        Column::Queue => self.queue_state.select(Some(idx)),
                     }
                     let prev_focus = self.focus;
                     self.focus = col;
@@ -363,6 +423,7 @@ impl App {
                     Column::Artists => self.artist_state.select(Some(0)),
                     Column::Albums => self.album_state.select(Some(0)),
                     Column::Tracks => self.track_state.select(Some(0)),
+                    Column::Queue => self.queue_state.select(Some(0)),
                 }
                 self.on_selection_moved();
             }
@@ -372,12 +433,14 @@ impl App {
                     Column::Artists => self.artist_filtered.len(),
                     Column::Albums => self.album_filtered.len(),
                     Column::Tracks => self.track_filtered.len(),
+                    Column::Queue => self.queue.items.len(),
                 };
                 if len > 0 {
                     match self.focus {
                         Column::Artists => self.artist_state.select(Some(len - 1)),
                         Column::Albums => self.album_state.select(Some(len - 1)),
                         Column::Tracks => self.track_state.select(Some(len - 1)),
+                        Column::Queue => self.queue_state.select(Some(len - 1)),
                     }
                 }
                 self.on_selection_moved();
@@ -437,7 +500,18 @@ impl App {
                 Column::Tracks => {
                     self.play_selected_track();
                 }
+                Column::Queue => {
+                    self.play_selected_queue_item();
+                }
             },
+
+            Message::AppendToQueue => {
+                self.modify_queue(QueueOp::Append);
+            }
+
+            Message::InsertNext => {
+                self.modify_queue(QueueOp::InsertNext);
+            }
 
             // -- Playback --
             Message::TogglePause => {
@@ -468,6 +542,7 @@ impl App {
                     Column::Artists => self.artist_state.select(Some(0)),
                     Column::Albums => self.album_state.select(Some(0)),
                     Column::Tracks => self.track_state.select(Some(0)),
+                    Column::Queue => {}
                 }
             }
             Message::FilterBackspace => {
@@ -701,6 +776,7 @@ impl App {
             Column::Artists => self.artist_rect,
             Column::Albums => self.album_rect,
             Column::Tracks => self.track_rect,
+            Column::Queue => self.queue_rect,
         };
         if rect.height < 3 {
             1
@@ -714,6 +790,7 @@ impl App {
             Column::Artists => (&mut self.artist_state, self.artist_filtered.len()),
             Column::Albums => (&mut self.album_state, self.album_filtered.len()),
             Column::Tracks => (&mut self.track_state, self.track_filtered.len()),
+            Column::Queue => (&mut self.queue_state, self.queue.items.len()),
         };
 
         if len == 0 {
@@ -749,6 +826,11 @@ impl App {
                 self.track_rect,
                 self.track_filtered.len(),
             ),
+            Column::Queue => (
+                &mut self.queue_state,
+                self.queue_rect,
+                self.queue.items.len(),
+            ),
         };
         if rect.height < 3 || len == 0 {
             return;
@@ -777,7 +859,7 @@ impl App {
         match self.focus {
             Column::Artists => self.on_artist_changed(),
             Column::Albums => self.on_album_changed(),
-            Column::Tracks => {}
+            Column::Tracks | Column::Queue => {}
         }
     }
 
@@ -792,25 +874,76 @@ impl App {
             return;
         };
 
-        let album = &self.albums[album_idx];
-
-        let items: Vec<QueueItem> = album
-            .tracks
-            .iter()
-            .map(|t| QueueItem {
-                track: t.clone(),
-                item_id: album.item_id,
-                album_title: album.album_title.clone(),
-                artist_name: album.artist_name.clone(),
-                art_url: album.art_url.clone(),
-                about: album.about.clone(),
-                credits: album.credits.clone(),
-                release_date: album.release_date.clone(),
-            })
-            .collect();
-
+        let items = album_queue_items(&self.albums[album_idx]);
         self.queue.replace_all(items, track_idx);
+        self.queue_state.select(Some(0));
+        *self.queue_state.offset_mut() = 0;
         self.start_playback();
+    }
+
+    fn play_selected_queue_item(&mut self) {
+        let Some(selected) = self.queue_state.selected() else {
+            return;
+        };
+        if selected >= self.queue.items.len() {
+            return;
+        }
+        self.queue.current = Some(selected);
+        self.start_playback();
+    }
+
+    fn modify_queue(&mut self, op: QueueOp) {
+        let items = match self.focus {
+            Column::Albums => {
+                let Some(album_idx) = self.selected_album_idx else {
+                    return;
+                };
+                let album = &self.albums[album_idx];
+                if album.tracks.is_empty() {
+                    self.status_msg = "Load tracks first (press Enter on album)".to_string();
+                    return;
+                }
+                album_queue_items(album)
+            }
+            Column::Tracks => {
+                let Some(album_idx) = self.selected_album_idx else {
+                    return;
+                };
+                let Some(selected) = self.track_state.selected() else {
+                    return;
+                };
+                let Some(&track_idx) = self.track_filtered.get(selected) else {
+                    return;
+                };
+                let album = &self.albums[album_idx];
+                let Some(track) = album.tracks.get(track_idx) else {
+                    return;
+                };
+                vec![QueueItem {
+                    track: track.clone(),
+                    item_id: album.item_id,
+                    album_title: album.album_title.clone(),
+                    artist_name: album.artist_name.clone(),
+                    art_url: album.art_url.clone(),
+                    about: album.about.clone(),
+                    credits: album.credits.clone(),
+                    release_date: album.release_date.clone(),
+                }]
+            }
+            Column::Artists | Column::Queue => return,
+        };
+
+        let count = items.len();
+        match op {
+            QueueOp::Append => {
+                self.queue.append_items(items);
+                self.status_msg = format!("Added {} track(s) to end of queue", count);
+            }
+            QueueOp::InsertNext => {
+                self.queue.insert_next_items(items);
+                self.status_msg = format!("Added {} track(s) after current", count);
+            }
+        }
     }
 
     fn start_loading_album_details(&mut self, idx: usize) {

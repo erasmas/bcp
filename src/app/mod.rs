@@ -27,6 +27,7 @@ pub enum Column {
     Artists,
     Albums,
     Tracks,
+    Queue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -102,6 +103,7 @@ pub struct App {
     pub artist_state: ListState,
     pub album_state: ListState,
     pub track_state: ListState,
+    pub queue_state: ListState,
     pub library: LibraryIndex,
     pub download_rx: Vec<tokio::sync::mpsc::UnboundedReceiver<DownloadEvent>>,
     pub selected_album_idx: Option<usize>,
@@ -116,6 +118,7 @@ pub struct App {
     pub album_filtered: Vec<usize>,
     pub track_filtered: Vec<usize>,
     pub loading_tracks: bool,
+    pub queue_visible: bool,
     pub status_msg: String,
     pub should_quit: bool,
     pub dirty: bool,
@@ -136,6 +139,7 @@ pub struct App {
     pub(crate) artist_rect: Rect,
     pub(crate) album_rect: Rect,
     pub(crate) track_rect: Rect,
+    pub(crate) queue_rect: Rect,
     pub(crate) np_rect: Rect,
 }
 
@@ -154,6 +158,7 @@ impl App {
             artist_state: ListState::default(),
             album_state: ListState::default(),
             track_state: ListState::default(),
+            queue_state: ListState::default(),
             library: LibraryIndex::load().unwrap_or_else(|_| LibraryIndex::new()),
             download_rx: Vec::new(),
             selected_album_idx: None,
@@ -168,6 +173,7 @@ impl App {
             album_filtered: Vec::new(),
             track_filtered: Vec::new(),
             loading_tracks: false,
+            queue_visible: false,
             status_msg: String::new(),
             should_quit: false,
             dirty: true,
@@ -187,6 +193,7 @@ impl App {
             artist_rect: Rect::ZERO,
             album_rect: Rect::ZERO,
             track_rect: Rect::ZERO,
+            queue_rect: Rect::ZERO,
             np_rect: Rect::ZERO,
         }
     }
@@ -644,6 +651,10 @@ impl App {
                 let url = format!("{}/track/{}", origin, slugify(&track.title));
                 (url, "track link".to_string())
             }
+            Column::Queue => {
+                self.status_msg = "Nothing to yank".to_string();
+                return;
+            }
         };
 
         match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(url.clone())) {
@@ -721,6 +732,7 @@ impl App {
                 self.on_album_changed();
             }
             Column::Tracks => self.recompute_track_filter(),
+            Column::Queue => {}
         }
     }
 
@@ -741,6 +753,9 @@ impl App {
             track_selected: self.track_state.selected(),
             track_offset: self.track_state.offset(),
             meta_scroll: self.meta_scroll,
+            queue_visible: self.queue_visible,
+            queue_selected: self.queue_state.selected(),
+            queue_offset: self.queue_state.offset(),
         };
         let _ = crate::state::save_state(&state);
     }
@@ -770,6 +785,7 @@ impl App {
 
         self.focus = state.focus;
         self.meta_scroll = state.meta_scroll;
+        self.queue_visible = state.queue_visible;
 
         if !state.queue_items.is_empty() {
             self.queue.items = state.queue_items;
@@ -779,6 +795,11 @@ impl App {
             }
             self.start_playback();
         }
+
+        if let Some(sel) = state.queue_selected {
+            self.queue_state.select(Some(sel));
+        }
+        *self.queue_state.offset_mut() = state.queue_offset;
     }
 
     /// Populate albums list from the library index for offline mode.
