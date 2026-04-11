@@ -40,6 +40,34 @@ impl PlayQueue {
         };
     }
 
+    /// Append items to the end of the queue. If the queue was empty, sets
+    /// current to the first appended item.
+    pub fn append_items(&mut self, items: Vec<QueueItem>) {
+        if items.is_empty() {
+            return;
+        }
+        if self.items.is_empty() {
+            self.current = Some(0);
+        }
+        self.items.extend(items);
+    }
+
+    /// Insert items immediately after the current position. If the queue is
+    /// empty, the items become the whole queue and current is set to 0.
+    /// The current index is unchanged — it still points to the same item.
+    pub fn insert_next_items(&mut self, items: Vec<QueueItem>) {
+        if items.is_empty() {
+            return;
+        }
+        let insert_at = self.current.map(|i| i + 1).unwrap_or(0);
+        let tail = self.items.split_off(insert_at);
+        self.items.extend(items);
+        self.items.extend(tail);
+        if self.current.is_none() {
+            self.current = Some(0);
+        }
+    }
+
     pub fn next(&mut self) -> Option<&QueueItem> {
         let len = self.items.len();
         if len == 0 {

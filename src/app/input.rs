@@ -94,6 +94,12 @@ impl App {
             KeyCode::Char('G') => Some(Message::MoveToBottom),
             KeyCode::PageDown => Some(Message::PageDown),
             KeyCode::PageUp => Some(Message::PageUp),
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Message::InsertNext)
+            }
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                Some(Message::AppendToQueue)
+            }
             KeyCode::Enter => Some(Message::Enter),
             KeyCode::Char(' ') => Some(Message::TogglePause),
             KeyCode::Char('n') => Some(Message::NextTrack),

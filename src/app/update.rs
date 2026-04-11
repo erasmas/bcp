@@ -1,6 +1,29 @@
 use anyhow::Result;
 
 use super::{App, AppScreen, Column, LoginStep};
+use crate::bandcamp::models::Album;
+
+enum QueueOp {
+    Append,
+    InsertNext,
+}
+
+fn album_queue_items(album: &Album) -> Vec<QueueItem> {
+    album
+        .tracks
+        .iter()
+        .map(|t| QueueItem {
+            track: t.clone(),
+            item_id: album.item_id,
+            album_title: album.album_title.clone(),
+            artist_name: album.artist_name.clone(),
+            art_url: album.art_url.clone(),
+            about: album.about.clone(),
+            credits: album.credits.clone(),
+            release_date: album.release_date.clone(),
+        })
+        .collect()
+}
 
 /// Parse the bitrate from the first MP3 frame header.
 /// Returns e.g. "128 kbps" for CBR or "VBR" for variable-bitrate files.
@@ -80,6 +103,8 @@ impl Message {
             Self::HalfPageDown => Some(("^D", "half page down")),
             Self::HalfPageUp => Some(("^U", "half page up")),
             Self::Enter => Some(("Enter", "open/play")),
+            Self::AppendToQueue => Some(("Shift+Enter", "append to queue")),
+            Self::InsertNext => Some(("Ctrl+Enter", "play next")),
             // Playback
             Self::TogglePause => Some(("Space", "pause")),
             Self::NextTrack => Some(("n", "next track")),
@@ -165,6 +190,8 @@ pub enum Message {
     HalfPageDown,
     HalfPageUp,
     Enter,
+    AppendToQueue,
+    InsertNext,
 
     // Playback
     TogglePause,
@@ -476,6 +503,14 @@ impl App {
                     self.play_selected_queue_item();
                 }
             },
+
+            Message::AppendToQueue => {
+                self.modify_queue(QueueOp::Append);
+            }
+
+            Message::InsertNext => {
+                self.modify_queue(QueueOp::InsertNext);
+            }
 
             // -- Playback --
             Message::TogglePause => {
@@ -826,23 +861,7 @@ impl App {
             return;
         };
 
-        let album = &self.albums[album_idx];
-
-        let items: Vec<QueueItem> = album
-            .tracks
-            .iter()
-            .map(|t| QueueItem {
-                track: t.clone(),
-                item_id: album.item_id,
-                album_title: album.album_title.clone(),
-                artist_name: album.artist_name.clone(),
-                art_url: album.art_url.clone(),
-                about: album.about.clone(),
-                credits: album.credits.clone(),
-                release_date: album.release_date.clone(),
-            })
-            .collect();
-
+        let items = album_queue_items(&self.albums[album_idx]);
         self.queue.replace_all(items, track_idx);
         self.queue_state.select(Some(0));
         *self.queue_state.offset_mut() = 0;
@@ -858,6 +877,60 @@ impl App {
         }
         self.queue.current = Some(selected);
         self.start_playback();
+    }
+
+    fn modify_queue(&mut self, op: QueueOp) {
+        let items = match self.focus {
+            Column::Albums => {
+                let Some(album_idx) = self.selected_album_idx else {
+                    return;
+                };
+                let album = &self.albums[album_idx];
+                if album.tracks.is_empty() {
+                    self.status_msg = "Load tracks first (press Enter on album)".to_string();
+                    return;
+                }
+                album_queue_items(album)
+            }
+            Column::Tracks => {
+                let Some(album_idx) = self.selected_album_idx else {
+                    return;
+                };
+                let Some(selected) = self.track_state.selected() else {
+                    return;
+                };
+                let Some(&track_idx) = self.track_filtered.get(selected) else {
+                    return;
+                };
+                let album = &self.albums[album_idx];
+                let Some(track) = album.tracks.get(track_idx) else {
+                    return;
+                };
+                vec![QueueItem {
+                    track: track.clone(),
+                    item_id: album.item_id,
+                    album_title: album.album_title.clone(),
+                    artist_name: album.artist_name.clone(),
+                    art_url: album.art_url.clone(),
+                    about: album.about.clone(),
+                    credits: album.credits.clone(),
+                    release_date: album.release_date.clone(),
+                }]
+            }
+            Column::Artists | Column::Queue => return,
+        };
+
+        let count = items.len();
+        match op {
+            QueueOp::Append => {
+                self.queue.append_items(items);
+                self.status_msg = format!("Added {} track(s) to end of queue", count);
+            }
+            QueueOp::InsertNext => {
+                self.queue.insert_next_items(items);
+                self.status_msg = format!("Added {} track(s) after current", count);
+            }
+        }
     }
 
     fn start_loading_album_details(&mut self, idx: usize) {
