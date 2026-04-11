@@ -111,9 +111,10 @@ pub struct App {
     pub stream_bitrate: Option<String>,
     pub meta_scroll: usize,
     pub elapsed: f64,
+    /// Instant the current track began playing, shifted forward by any pause
+    /// duration on resume so that `play_started.elapsed()` always reflects real
+    /// playback time.
     pub play_started: Option<Instant>,
-    pub pause_accumulated: f64,
-    pub pause_started: Option<Instant>,
     pub filter_text: String,
     pub artist_filtered: Vec<usize>,
     pub album_filtered: Vec<usize>,
@@ -169,8 +170,6 @@ impl App {
             meta_scroll: 0,
             elapsed: 0.0,
             play_started: None,
-            pause_accumulated: 0.0,
-            pause_started: None,
             filter_text: String::new(),
             artist_filtered: Vec::new(),
             album_filtered: Vec::new(),
@@ -297,7 +296,7 @@ impl App {
         if let Some(started) = self.play_started
             && !self.is_paused
         {
-            let new_elapsed = started.elapsed().as_secs_f64() - self.pause_accumulated;
+            let new_elapsed = started.elapsed().as_secs_f64();
             if (new_elapsed - self.elapsed).abs() > 0.1 {
                 self.elapsed = new_elapsed;
                 self.dirty = true;
