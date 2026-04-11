@@ -1,8 +1,8 @@
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Rect},
+    layout::Rect,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Row, Table, Widget},
+    widgets::{Block, Borders, Paragraph, Widget},
 };
 
 use crate::app::Message;
@@ -13,6 +13,7 @@ pub struct SettingsView<'a> {
     pub username: &'a str,
     pub album_count: usize,
     pub downloaded_count: usize,
+    pub scroll: u16,
 }
 
 impl<'a> Widget for SettingsView<'a> {
@@ -36,8 +37,7 @@ impl<'a> Widget for SettingsView<'a> {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        // Info section
-        let info_lines = vec![
+        let mut all_lines: Vec<Line> = vec![
             Line::from(""),
             Line::from(vec![
                 Span::styled("  Version:      ", theme::dim()),
@@ -60,59 +60,44 @@ impl<'a> Widget for SettingsView<'a> {
             Line::from(""),
             Line::from(vec![
                 Span::styled("  Config:       ", theme::dim()),
-                Span::styled(&config_dir, theme::normal()),
+                Span::styled(config_dir, theme::normal()),
             ]),
             Line::from(vec![
                 Span::styled("  Cache:        ", theme::dim()),
-                Span::styled(&cache_dir, theme::normal()),
+                Span::styled(cache_dir, theme::normal()),
             ]),
             Line::from(vec![
                 Span::styled("  Library:      ", theme::dim()),
-                Span::styled(&library_dir, theme::normal()),
+                Span::styled(library_dir, theme::normal()),
             ]),
             Line::from(""),
             Line::from(Span::styled("  Keybindings", theme::selected())),
             Line::from(""),
         ];
 
-        let info_height = info_lines.len() as u16;
-        let info_area = Rect::new(inner.x, inner.y, inner.width, info_height.min(inner.height));
-        Paragraph::new(info_lines).render(info_area, buf);
+        // Render keybindings as text lines so they participate in Paragraph scroll.
+        let bindings = Message::all_keybindings();
+        let col_width = 28usize;
+        let num_cols = ((inner.width as usize) / col_width).max(1);
+        let num_rows = bindings.len().div_ceil(num_cols);
 
-        // Keybindings table
-        if inner.height > info_height {
-            let table_area = Rect::new(
-                inner.x + 2,
-                inner.y + info_height,
-                inner.width.saturating_sub(4),
-                inner.height - info_height,
-            );
-
-            let bindings = Message::all_keybindings();
-            let col_width = 28u16;
-            let num_cols = (table_area.width / col_width).max(1) as usize;
-            let num_rows = bindings.len().div_ceil(num_cols);
-
-            let rows: Vec<Row> = (0..num_rows)
-                .map(|row| {
-                    let mut cells = Vec::new();
-                    for col in 0..num_cols {
-                        let idx = col * num_rows + row;
-                        if let Some((key, desc)) = bindings.get(idx) {
-                            cells.push(Span::styled(*key, theme::normal()));
-                            cells.push(Span::styled(*desc, theme::dim()));
-                        }
-                    }
-                    Row::new(cells)
-                })
-                .collect();
-
-            let widths: Vec<Constraint> = (0..num_cols)
-                .flat_map(|_| [Constraint::Length(8), Constraint::Length(col_width - 8)])
-                .collect();
-
-            let table = Table::new(rows, widths);
-            Widget::render(table, table_area, buf);
+        for row in 0..num_rows {
+            let mut spans = vec![Span::raw("  ")];
+            for col in 0..num_cols {
+                let idx = col * num_rows + row;
+                if let Some((key, desc)) = bindings.get(idx) {
+                    spans.push(Span::styled(format!("{:<8}", key), theme::normal()));
+                    spans.push(Span::styled(
+                        format!("{:<width$}", desc, width = col_width - 8),
+                        theme::dim(),
+                    ));
+                }
+            }
+            all_lines.push(Line::from(spans));
         }
+
+        Paragraph::new(all_lines)
+            .scroll((self.scroll, 0))
+            .render(inner, buf);
     }
 }

@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use super::{App, AppScreen, Column, LoginStep};
+use super::{App, AppMode, AppScreen, Column, LoginStep};
 use crate::bandcamp::models::Album;
 
 enum QueueOp {
@@ -122,6 +122,7 @@ impl Message {
             Self::DownloadAll => Some(("D", "download all")),
             // UI
             Self::ToggleSettings => Some(("?", "info")),
+            Self::ScrollSettings(_) => None,
             Self::Refresh => Some(("r", "refresh")),
             Self::Yank => Some(("y", "yank link")),
             // Internal (login, async results)
@@ -215,6 +216,7 @@ pub enum Message {
 
     // UI
     ToggleSettings,
+    ScrollSettings(i16),
     Refresh,
     Yank,
     // Login
@@ -529,7 +531,7 @@ impl App {
 
             // -- Filter --
             Message::StartFilter => {
-                self.filter_mode = true;
+                self.mode = AppMode::Filter;
                 self.filter_text.clear();
                 self.recompute_active_filter();
             }
@@ -548,12 +550,12 @@ impl App {
                 self.recompute_active_filter();
             }
             Message::CancelFilter => {
-                self.filter_mode = false;
+                self.mode = AppMode::Normal;
                 self.filter_text.clear();
                 self.recompute_active_filter();
             }
             Message::ConfirmFilter => {
-                self.filter_mode = false;
+                self.mode = AppMode::Normal;
             }
 
             // -- Downloads --
@@ -562,7 +564,19 @@ impl App {
 
             // -- UI --
             Message::ToggleSettings => {
-                self.show_settings = !self.show_settings;
+                self.mode = match self.mode {
+                    AppMode::Settings { .. } => AppMode::Normal,
+                    _ => AppMode::Settings { scroll: 0 },
+                };
+            }
+            Message::ScrollSettings(delta) => {
+                if let AppMode::Settings { ref mut scroll } = self.mode {
+                    if delta > 0 {
+                        *scroll = scroll.saturating_add(delta as u16);
+                    } else {
+                        *scroll = scroll.saturating_sub((-delta) as u16);
+                    }
+                }
             }
             Message::Refresh => {
                 cache::invalidate_cache()?;
