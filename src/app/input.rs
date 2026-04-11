@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
-use super::{App, AppScreen, Column, LoginStep, Message};
+use super::{App, AppMode, AppScreen, Column, LoginStep, Message};
 
 fn rect_contains(rect: Rect, x: u16, y: u16) -> bool {
     rect.width > 0
@@ -22,15 +22,15 @@ impl App {
         match self.screen {
             AppScreen::Login => self.map_login_key(key),
             AppScreen::Loading => None,
-            AppScreen::Main => {
-                if self.show_settings {
-                    return match key.code {
-                        KeyCode::Esc | KeyCode::Char('?') => Some(Message::ToggleSettings),
-                        KeyCode::Char('q') => Some(Message::Quit),
-                        _ => None,
-                    };
-                }
-                if self.filter_mode {
+            AppScreen::Main => match self.mode {
+                AppMode::Settings { .. } => match key.code {
+                    KeyCode::Esc | KeyCode::Char('?') => Some(Message::ToggleSettings),
+                    KeyCode::Char('q') => Some(Message::Quit),
+                    KeyCode::Char('j') | KeyCode::Down => Some(Message::ScrollSettings(1)),
+                    KeyCode::Char('k') | KeyCode::Up => Some(Message::ScrollSettings(-1)),
+                    _ => None,
+                },
+                AppMode::Filter => {
                     let is_nav = matches!(key.code, KeyCode::Up | KeyCode::Down | KeyCode::Enter);
                     if !is_nav {
                         return self.map_filter_key(key);
@@ -39,9 +39,10 @@ impl App {
                     if key.code == KeyCode::Enter {
                         return Some(Message::ConfirmFilter);
                     }
+                    self.map_main_key(key)
                 }
-                self.map_main_key(key)
-            }
+                AppMode::Normal => self.map_main_key(key),
+            },
         }
     }
 
@@ -111,8 +112,19 @@ impl App {
 
     /// Pure mapping from a mouse event to zero or more messages.
     pub(crate) fn map_mouse(&self, ev: MouseEvent) -> Vec<Message> {
-        if self.screen != AppScreen::Main || self.show_settings || self.filter_mode {
+        if self.screen != AppScreen::Main {
             return Vec::new();
+        }
+        match self.mode {
+            AppMode::Filter => return Vec::new(),
+            AppMode::Settings { .. } => {
+                return match ev.kind {
+                    MouseEventKind::ScrollDown => vec![Message::ScrollSettings(1)],
+                    MouseEventKind::ScrollUp => vec![Message::ScrollSettings(-1)],
+                    _ => Vec::new(),
+                };
+            }
+            AppMode::Normal => {}
         }
 
         let x = ev.column;
