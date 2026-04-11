@@ -38,7 +38,9 @@ impl<'a> StatefulWidget for QueueColumn<'a> {
             .padding(Padding::right(1));
 
         if self.items.is_empty() {
-            let paragraph = Paragraph::new("  Queue is empty").style(theme::dim()).block(block);
+            let paragraph = Paragraph::new("  Queue is empty")
+                .style(theme::dim())
+                .block(block);
             paragraph.render(area, buf);
             return;
         }

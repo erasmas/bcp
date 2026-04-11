@@ -118,19 +118,18 @@ impl App {
 
         // Now playing bar
         let has_art = self.art_protocol.is_some();
-        let (queue_remaining_tracks, queue_remaining_time) =
-            if let Some(cur) = self.queue.current {
-                let after = &self.queue.items[cur.saturating_add(1).min(self.queue.items.len())..];
-                let current_left = self
-                    .queue
-                    .current_item()
-                    .map(|i| (i.track.duration - self.elapsed).max(0.0))
-                    .unwrap_or(0.0);
-                let subsequent: f64 = after.iter().map(|i| i.track.duration).sum();
-                (after.len(), current_left + subsequent)
-            } else {
-                (0, 0.0)
-            };
+        let (queue_remaining_tracks, queue_remaining_time) = if let Some(cur) = self.queue.current {
+            let after = &self.queue.items[cur.saturating_add(1).min(self.queue.items.len())..];
+            let current_left = self
+                .queue
+                .current_item()
+                .map(|i| (i.track.duration - self.elapsed).max(0.0))
+                .unwrap_or(0.0);
+            let subsequent: f64 = after.iter().map(|i| i.track.duration).sum();
+            (after.len(), current_left + subsequent)
+        } else {
+            (0, 0.0)
+        };
         let now_playing = NowPlayingBar {
             current: self.queue.current_item(),
             is_paused: self.is_paused,
@@ -189,7 +188,11 @@ impl App {
 
         // Column 1 (queue mode) / Column 2: Albums for selected artist
         let artist_albums = self.current_artist_album_indices();
-        let album_col = if self.queue_visible { columns[0] } else { columns[1] };
+        let album_col = if self.queue_visible {
+            columns[0]
+        } else {
+            columns[1]
+        };
         let album_view = AlbumColumn {
             albums: &self.albums,
             album_indices: &artist_albums,
@@ -204,7 +207,11 @@ impl App {
         let playing_album_id = current.map(|q| q.item_id);
         let playing_track_num = current.map(|q| q.track.track_num);
         let selected_album = self.selected_album_idx.and_then(|i| self.albums.get(i));
-        let track_col = if self.queue_visible { columns[1] } else { columns[2] };
+        let track_col = if self.queue_visible {
+            columns[1]
+        } else {
+            columns[2]
+        };
         let track_view = TrackColumn {
             album: selected_album,
             playing_album_id,

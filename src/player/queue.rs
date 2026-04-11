@@ -242,7 +242,10 @@ mod tests {
     fn insert_next_in_middle() {
         let mut q = PlayQueue::new();
         // [1, 2*, 3, 4]  ->  insert [A, B]  ->  [1, 2*, A, B, 3, 4]
-        q.replace_all(vec![make_item(1), make_item(2), make_item(3), make_item(4)], 1);
+        q.replace_all(
+            vec![make_item(1), make_item(2), make_item(3), make_item(4)],
+            1,
+        );
         q.insert_next_items(vec![make_item(10), make_item(11)]);
         assert_eq!(q.current, Some(1)); // still pointing at track 2
         assert_eq!(q.items.len(), 6);

@@ -294,9 +294,8 @@ impl App {
                     Column::Tracks => {
                         if !self.queue.items.is_empty() {
                             if self.queue_state.selected().is_none() {
-                                self.queue_state.select(Some(
-                                    self.queue.current.unwrap_or(0),
-                                ));
+                                self.queue_state
+                                    .select(Some(self.queue.current.unwrap_or(0)));
                             }
                             self.queue_visible = true;
                             self.focus = Column::Queue;
