@@ -233,6 +233,7 @@ impl App {
                     }
                     Column::Albums => {
                         self.focus = Column::Artists;
+                        self.queue_visible = false;
                         self.recompute_active_filter();
                     }
                     Column::Artists => {}
@@ -270,6 +271,7 @@ impl App {
                                     self.queue.current.unwrap_or(0),
                                 ));
                             }
+                            self.queue_visible = true;
                             self.focus = Column::Queue;
                         }
                     }
@@ -286,6 +288,7 @@ impl App {
                     match col {
                         Column::Artists => {
                             self.focus = Column::Artists;
+                            self.queue_visible = false;
                             self.recompute_active_filter();
                         }
                         Column::Albums => {
@@ -313,6 +316,7 @@ impl App {
                                     self.queue_state
                                         .select(Some(self.queue.current.unwrap_or(0)));
                                 }
+                                self.queue_visible = true;
                                 self.focus = Column::Queue;
                             }
                         }

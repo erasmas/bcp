@@ -3,8 +3,8 @@ use ratatui::{
     layout::Rect,
     text::{Line, Span},
     widgets::{
-        Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
-        StatefulWidget, Widget,
+        Block, BorderType, Borders, HighlightSpacing, List, ListItem, ListState, Padding,
+        Paragraph, StatefulWidget, Widget,
     },
 };
 
@@ -33,6 +33,7 @@ impl<'a> StatefulWidget for QueueColumn<'a> {
             .title(title)
             .title_style(theme::title())
             .borders(Borders::ALL)
+            .border_type(BorderType::Double)
             .border_style(border_style)
             .padding(Padding::right(1));
 

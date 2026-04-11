@@ -147,9 +147,10 @@ impl App {
         ])
         .split(chunks[1]);
 
-        let queue_focused = self.focus == Column::Queue;
-
-        if queue_focused {
+        // Sliding window: show [Albums | Tracks | Queue] while queue_visible,
+        // otherwise [Artists | Albums | Tracks]. The viewport only resets when
+        // focus moves all the way back to Artists.
+        if self.queue_visible {
             self.artist_rect = Rect::ZERO;
             self.album_rect = columns[0];
             self.track_rect = columns[1];
@@ -161,8 +162,8 @@ impl App {
             self.queue_rect = Rect::ZERO;
         }
 
-        // Column 1: Artists (hidden when Queue is focused)
-        if !queue_focused {
+        // Column 1: Artists (hidden while queue panel is open)
+        if !self.queue_visible {
             let artist_view = ArtistColumn {
                 artists: &self.artist_index.artists,
                 filtered_indices: &self.artist_filtered,
@@ -173,7 +174,7 @@ impl App {
 
         // Column 1 (queue mode) / Column 2: Albums for selected artist
         let artist_albums = self.current_artist_album_indices();
-        let album_col = if queue_focused { columns[0] } else { columns[1] };
+        let album_col = if self.queue_visible { columns[0] } else { columns[1] };
         let album_view = AlbumColumn {
             albums: &self.albums,
             album_indices: &artist_albums,
@@ -188,7 +189,7 @@ impl App {
         let playing_album_id = current.map(|q| q.item_id);
         let playing_track_num = current.map(|q| q.track.track_num);
         let selected_album = self.selected_album_idx.and_then(|i| self.albums.get(i));
-        let track_col = if queue_focused { columns[1] } else { columns[2] };
+        let track_col = if self.queue_visible { columns[1] } else { columns[2] };
         let track_view = TrackColumn {
             album: selected_album,
             playing_album_id,
@@ -200,12 +201,12 @@ impl App {
         };
         frame.render_stateful_widget(track_view, track_col, &mut self.track_state);
 
-        // Column 3 (queue mode): Queue
-        if queue_focused {
+        // Column 3: Queue (always rendered while queue panel is open)
+        if self.queue_visible {
             let queue_view = QueueColumn {
                 items: &self.queue.items,
                 current: self.queue.current,
-                focused: true,
+                focused: self.focus == Column::Queue,
             };
             frame.render_stateful_widget(queue_view, columns[2], &mut self.queue_state);
         }
