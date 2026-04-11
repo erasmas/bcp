@@ -844,6 +844,8 @@ impl App {
             .collect();
 
         self.queue.replace_all(items, track_idx);
+        self.queue_state.select(Some(0));
+        *self.queue_state.offset_mut() = 0;
         self.start_playback();
     }
 
