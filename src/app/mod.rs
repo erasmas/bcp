@@ -748,6 +748,9 @@ impl App {
             track_selected: self.track_state.selected(),
             track_offset: self.track_state.offset(),
             meta_scroll: self.meta_scroll,
+            queue_visible: self.queue_visible,
+            queue_selected: self.queue_state.selected(),
+            queue_offset: self.queue_state.offset(),
         };
         let _ = crate::state::save_state(&state);
     }
@@ -777,6 +780,7 @@ impl App {
 
         self.focus = state.focus;
         self.meta_scroll = state.meta_scroll;
+        self.queue_visible = state.queue_visible;
 
         if !state.queue_items.is_empty() {
             self.queue.items = state.queue_items;
@@ -786,6 +790,11 @@ impl App {
             }
             self.start_playback();
         }
+
+        if let Some(sel) = state.queue_selected {
+            self.queue_state.select(Some(sel));
+        }
+        *self.queue_state.offset_mut() = state.queue_offset;
     }
 
     /// Populate albums list from the library index for offline mode.
