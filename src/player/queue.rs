@@ -195,4 +195,92 @@ mod tests {
         let mut q = PlayQueue::new();
         assert!(q.prev().is_none());
     }
+
+    // -- append_items --
+
+    #[test]
+    fn append_to_empty_sets_current() {
+        let mut q = PlayQueue::new();
+        q.append_items(vec![make_item(1), make_item(2)]);
+        assert_eq!(q.current, Some(0));
+        assert_eq!(q.items.len(), 2);
+    }
+
+    #[test]
+    fn append_to_nonempty_preserves_current() {
+        let mut q = PlayQueue::new();
+        q.replace_all(vec![make_item(1), make_item(2)], 1);
+        q.append_items(vec![make_item(3), make_item(4)]);
+        assert_eq!(q.current, Some(1)); // unchanged
+        assert_eq!(q.items.len(), 4);
+        assert_eq!(q.items[2].track.track_num, 3);
+        assert_eq!(q.items[3].track.track_num, 4);
+    }
+
+    #[test]
+    fn append_empty_vec_is_noop() {
+        let mut q = PlayQueue::new();
+        q.replace_all(vec![make_item(1)], 0);
+        q.append_items(vec![]);
+        assert_eq!(q.current, Some(0));
+        assert_eq!(q.items.len(), 1);
+    }
+
+    // -- insert_next_items --
+
+    #[test]
+    fn insert_next_into_empty_queue() {
+        let mut q = PlayQueue::new();
+        q.insert_next_items(vec![make_item(1), make_item(2)]);
+        assert_eq!(q.current, Some(0));
+        assert_eq!(q.items.len(), 2);
+        assert_eq!(q.items[0].track.track_num, 1);
+        assert_eq!(q.items[1].track.track_num, 2);
+    }
+
+    #[test]
+    fn insert_next_in_middle() {
+        let mut q = PlayQueue::new();
+        // [1, 2*, 3, 4]  ->  insert [A, B]  ->  [1, 2*, A, B, 3, 4]
+        q.replace_all(vec![make_item(1), make_item(2), make_item(3), make_item(4)], 1);
+        q.insert_next_items(vec![make_item(10), make_item(11)]);
+        assert_eq!(q.current, Some(1)); // still pointing at track 2
+        assert_eq!(q.items.len(), 6);
+        assert_eq!(q.items[1].track.track_num, 2);
+        assert_eq!(q.items[2].track.track_num, 10);
+        assert_eq!(q.items[3].track.track_num, 11);
+        assert_eq!(q.items[4].track.track_num, 3);
+        assert_eq!(q.items[5].track.track_num, 4);
+    }
+
+    #[test]
+    fn insert_next_at_last_item() {
+        let mut q = PlayQueue::new();
+        // [1, 2*]  ->  insert [3]  ->  [1, 2*, 3]
+        q.replace_all(vec![make_item(1), make_item(2)], 1);
+        q.insert_next_items(vec![make_item(3)]);
+        assert_eq!(q.current, Some(1));
+        assert_eq!(q.items.len(), 3);
+        assert_eq!(q.items[2].track.track_num, 3);
+    }
+
+    #[test]
+    fn insert_next_empty_vec_is_noop() {
+        let mut q = PlayQueue::new();
+        q.replace_all(vec![make_item(1), make_item(2)], 0);
+        q.insert_next_items(vec![]);
+        assert_eq!(q.current, Some(0));
+        assert_eq!(q.items.len(), 2);
+    }
+
+    #[test]
+    fn next_plays_inserted_item() {
+        let mut q = PlayQueue::new();
+        // Insert next then advance — should land on the inserted track
+        q.replace_all(vec![make_item(1), make_item(2)], 0);
+        q.insert_next_items(vec![make_item(99)]);
+        let item = q.next().unwrap();
+        assert_eq!(item.track.track_num, 99);
+        assert_eq!(q.current, Some(1));
+    }
 }
