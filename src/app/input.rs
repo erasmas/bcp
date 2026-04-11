@@ -125,6 +125,8 @@ impl App {
             Some((Column::Albums, self.album_rect))
         } else if rect_contains(self.track_rect, x, y) {
             Some((Column::Tracks, self.track_rect))
+        } else if rect_contains(self.queue_rect, x, y) {
+            Some((Column::Queue, self.queue_rect))
         } else {
             None
         };
@@ -144,12 +146,14 @@ impl App {
                             Column::Artists => self.artist_state.offset(),
                             Column::Albums => self.album_state.offset(),
                             Column::Tracks => self.track_state.offset(),
+                            Column::Queue => self.queue_state.offset(),
                         };
                         let idx = offset + visible_row;
                         let len = match col {
                             Column::Artists => self.artist_filtered.len(),
                             Column::Albums => self.album_filtered.len(),
                             Column::Tracks => self.track_filtered.len(),
+                            Column::Queue => self.queue.items.len(),
                         };
                         if idx < len {
                             return vec![Message::SelectAt(col, idx)];

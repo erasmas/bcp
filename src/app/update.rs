@@ -223,6 +223,10 @@ impl App {
                     self.filter_text.clear();
                 }
                 match self.focus {
+                    Column::Queue => {
+                        self.focus = Column::Tracks;
+                        self.recompute_active_filter();
+                    }
                     Column::Tracks => {
                         self.focus = Column::Albums;
                         self.recompute_active_filter();
@@ -259,7 +263,17 @@ impl App {
                             self.recompute_active_filter();
                         }
                     }
-                    Column::Tracks => {}
+                    Column::Tracks => {
+                        if !self.queue.items.is_empty() {
+                            if self.queue_state.selected().is_none() {
+                                self.queue_state.select(Some(
+                                    self.queue.current.unwrap_or(0),
+                                ));
+                            }
+                            self.focus = Column::Queue;
+                        }
+                    }
+                    Column::Queue => {}
                 }
             }
 
@@ -293,6 +307,15 @@ impl App {
                                 self.recompute_active_filter();
                             }
                         }
+                        Column::Queue => {
+                            if !self.queue.items.is_empty() {
+                                if self.queue_state.selected().is_none() {
+                                    self.queue_state
+                                        .select(Some(self.queue.current.unwrap_or(0)));
+                                }
+                                self.focus = Column::Queue;
+                            }
+                        }
                     }
                 }
             }
@@ -314,6 +337,11 @@ impl App {
                         self.track_rect,
                         &mut self.track_state,
                     ),
+                    Column::Queue => (
+                        self.queue.items.len(),
+                        self.queue_rect,
+                        &mut self.queue_state,
+                    ),
                 };
                 if len == 0 || rect.height < 3 {
                     return Ok(());
@@ -330,12 +358,14 @@ impl App {
                     Column::Artists => self.artist_filtered.len(),
                     Column::Albums => self.album_filtered.len(),
                     Column::Tracks => self.track_filtered.len(),
+                    Column::Queue => self.queue.items.len(),
                 };
                 if idx < len {
                     match col {
                         Column::Artists => self.artist_state.select(Some(idx)),
                         Column::Albums => self.album_state.select(Some(idx)),
                         Column::Tracks => self.track_state.select(Some(idx)),
+                        Column::Queue => self.queue_state.select(Some(idx)),
                     }
                     let prev_focus = self.focus;
                     self.focus = col;
@@ -361,6 +391,7 @@ impl App {
                     Column::Artists => self.artist_state.select(Some(0)),
                     Column::Albums => self.album_state.select(Some(0)),
                     Column::Tracks => self.track_state.select(Some(0)),
+                    Column::Queue => self.queue_state.select(Some(0)),
                 }
                 self.on_selection_moved();
             }
@@ -370,12 +401,14 @@ impl App {
                     Column::Artists => self.artist_filtered.len(),
                     Column::Albums => self.album_filtered.len(),
                     Column::Tracks => self.track_filtered.len(),
+                    Column::Queue => self.queue.items.len(),
                 };
                 if len > 0 {
                     match self.focus {
                         Column::Artists => self.artist_state.select(Some(len - 1)),
                         Column::Albums => self.album_state.select(Some(len - 1)),
                         Column::Tracks => self.track_state.select(Some(len - 1)),
+                        Column::Queue => self.queue_state.select(Some(len - 1)),
                     }
                 }
                 self.on_selection_moved();
@@ -435,6 +468,9 @@ impl App {
                 Column::Tracks => {
                     self.play_selected_track();
                 }
+                Column::Queue => {
+                    self.play_selected_queue_item();
+                }
             },
 
             // -- Playback --
@@ -466,6 +502,7 @@ impl App {
                     Column::Artists => self.artist_state.select(Some(0)),
                     Column::Albums => self.album_state.select(Some(0)),
                     Column::Tracks => self.track_state.select(Some(0)),
+                    Column::Queue => {}
                 }
             }
             Message::FilterBackspace => {
@@ -687,6 +724,7 @@ impl App {
             Column::Artists => self.artist_rect,
             Column::Albums => self.album_rect,
             Column::Tracks => self.track_rect,
+            Column::Queue => self.queue_rect,
         };
         if rect.height < 3 {
             1
@@ -700,6 +738,7 @@ impl App {
             Column::Artists => (&mut self.artist_state, self.artist_filtered.len()),
             Column::Albums => (&mut self.album_state, self.album_filtered.len()),
             Column::Tracks => (&mut self.track_state, self.track_filtered.len()),
+            Column::Queue => (&mut self.queue_state, self.queue.items.len()),
         };
 
         if len == 0 {
@@ -735,6 +774,11 @@ impl App {
                 self.track_rect,
                 self.track_filtered.len(),
             ),
+            Column::Queue => (
+                &mut self.queue_state,
+                self.queue_rect,
+                self.queue.items.len(),
+            ),
         };
         if rect.height < 3 || len == 0 {
             return;
@@ -763,7 +807,7 @@ impl App {
         match self.focus {
             Column::Artists => self.on_artist_changed(),
             Column::Albums => self.on_album_changed(),
-            Column::Tracks => {}
+            Column::Tracks | Column::Queue => {}
         }
     }
 
@@ -796,6 +840,17 @@ impl App {
             .collect();
 
         self.queue.replace_all(items, track_idx);
+        self.start_playback();
+    }
+
+    fn play_selected_queue_item(&mut self) {
+        let Some(selected) = self.queue_state.selected() else {
+            return;
+        };
+        if selected >= self.queue.items.len() {
+            return;
+        }
+        self.queue.current = Some(selected);
         self.start_playback();
     }
 

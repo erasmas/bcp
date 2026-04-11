@@ -27,6 +27,7 @@ pub enum Column {
     Artists,
     Albums,
     Tracks,
+    Queue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -95,6 +96,7 @@ pub struct App {
     pub artist_state: ListState,
     pub album_state: ListState,
     pub track_state: ListState,
+    pub queue_state: ListState,
     pub library: LibraryIndex,
     pub download_rx: Vec<tokio::sync::mpsc::UnboundedReceiver<DownloadEvent>>,
     pub selected_album_idx: Option<usize>,
@@ -130,6 +132,7 @@ pub struct App {
     pub(crate) artist_rect: Rect,
     pub(crate) album_rect: Rect,
     pub(crate) track_rect: Rect,
+    pub(crate) queue_rect: Rect,
     pub(crate) np_rect: Rect,
 }
 
@@ -148,6 +151,7 @@ impl App {
             artist_state: ListState::default(),
             album_state: ListState::default(),
             track_state: ListState::default(),
+            queue_state: ListState::default(),
             library: LibraryIndex::load().unwrap_or_else(|_| LibraryIndex::new()),
             download_rx: Vec::new(),
             selected_album_idx: None,
@@ -182,6 +186,7 @@ impl App {
             artist_rect: Rect::ZERO,
             album_rect: Rect::ZERO,
             track_rect: Rect::ZERO,
+            queue_rect: Rect::ZERO,
             np_rect: Rect::ZERO,
         }
     }
@@ -639,6 +644,10 @@ impl App {
                 let url = format!("{}/track/{}", origin, slugify(&track.title));
                 (url, "track link".to_string())
             }
+            Column::Queue => {
+                self.status_msg = "Nothing to yank".to_string();
+                return;
+            }
         };
 
         match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(url.clone())) {
@@ -716,6 +725,7 @@ impl App {
                 self.on_album_changed();
             }
             Column::Tracks => self.recompute_track_filter(),
+            Column::Queue => {}
         }
     }
 
