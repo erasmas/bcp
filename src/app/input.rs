@@ -122,7 +122,7 @@ impl App {
                     MouseEventKind::ScrollDown => vec![Message::ScrollSettings(1)],
                     MouseEventKind::ScrollUp => vec![Message::ScrollSettings(-1)],
                     _ => Vec::new(),
-                }
+                };
             }
             AppMode::Normal => {}
         }
