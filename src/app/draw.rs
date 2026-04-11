@@ -6,7 +6,7 @@ use ratatui::{
 };
 use ratatui_image::StatefulImage;
 
-use super::{App, AppScreen, Column, LoginStep};
+use super::{App, AppMode, AppScreen, Column, LoginStep};
 use crate::ui::logo::{LOGO, logo_gradient};
 use crate::ui::theme;
 use crate::ui::views::album::TrackColumn;
@@ -185,7 +185,7 @@ impl App {
         // Status bar
         let status_area = chunks[2];
 
-        if self.filter_mode {
+        if self.mode == AppMode::Filter {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -232,7 +232,7 @@ impl App {
         frame.render_widget(status, status_chunks[1]);
 
         // Settings overlay
-        if self.show_settings {
+        if let AppMode::Settings { scroll } = self.mode {
             let overlay_area = centered_rect(80, 80, chunks[1]);
             frame.render_widget(Clear, overlay_area);
             let username = self
@@ -250,7 +250,7 @@ impl App {
                 username,
                 album_count: self.albums.len(),
                 downloaded_count,
-                scroll: self.settings_scroll,
+                scroll,
             };
             frame.render_widget(view, overlay_area);
         }

@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use super::{App, AppScreen, Column, LoginStep};
+use super::{App, AppMode, AppScreen, Column, LoginStep};
 
 /// Parse the bitrate from the first MP3 frame header.
 /// Returns e.g. "128 kbps" for CBR or "VBR" for variable-bitrate files.
@@ -457,7 +457,7 @@ impl App {
 
             // -- Filter --
             Message::StartFilter => {
-                self.filter_mode = true;
+                self.mode = AppMode::Filter;
                 self.filter_text.clear();
                 self.recompute_active_filter();
             }
@@ -475,12 +475,12 @@ impl App {
                 self.recompute_active_filter();
             }
             Message::CancelFilter => {
-                self.filter_mode = false;
+                self.mode = AppMode::Normal;
                 self.filter_text.clear();
                 self.recompute_active_filter();
             }
             Message::ConfirmFilter => {
-                self.filter_mode = false;
+                self.mode = AppMode::Normal;
             }
 
             // -- Downloads --
@@ -489,14 +489,18 @@ impl App {
 
             // -- UI --
             Message::ToggleSettings => {
-                self.show_settings = !self.show_settings;
-                self.settings_scroll = 0;
+                self.mode = match self.mode {
+                    AppMode::Settings { .. } => AppMode::Normal,
+                    _ => AppMode::Settings { scroll: 0 },
+                };
             }
             Message::ScrollSettings(delta) => {
-                if delta > 0 {
-                    self.settings_scroll = self.settings_scroll.saturating_add(delta as u16);
-                } else {
-                    self.settings_scroll = self.settings_scroll.saturating_sub((-delta) as u16);
+                if let AppMode::Settings { ref mut scroll } = self.mode {
+                    if delta > 0 {
+                        *scroll = scroll.saturating_add(delta as u16);
+                    } else {
+                        *scroll = scroll.saturating_sub((-delta) as u16);
+                    }
                 }
             }
             Message::Refresh => {

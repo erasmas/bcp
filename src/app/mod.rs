@@ -43,6 +43,13 @@ pub enum LoginStep {
     Extracting,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AppMode {
+    Normal,
+    Filter,
+    Settings { scroll: u16 },
+}
+
 pub struct ArtistIndex {
     /// Sorted, deduplicated artist names (display casing)
     pub artists: Vec<String>,
@@ -88,8 +95,7 @@ impl ArtistIndex {
 pub struct App {
     pub screen: AppScreen,
     pub focus: Column,
-    pub show_settings: bool,
-    pub settings_scroll: u16,
+    pub mode: AppMode,
     pub albums: Vec<Album>,
     pub artist_index: ArtistIndex,
     pub queue: PlayQueue,
@@ -110,7 +116,6 @@ pub struct App {
     pub album_filtered: Vec<usize>,
     pub track_filtered: Vec<usize>,
     pub loading_tracks: bool,
-    pub filter_mode: bool,
     pub status_msg: String,
     pub should_quit: bool,
     pub dirty: bool,
@@ -139,8 +144,7 @@ impl App {
         Self {
             screen: AppScreen::Login,
             focus: Column::Artists,
-            show_settings: false,
-            settings_scroll: 0,
+            mode: AppMode::Normal,
             albums: Vec::new(),
             artist_index: ArtistIndex {
                 artists: Vec::new(),
@@ -164,7 +168,6 @@ impl App {
             album_filtered: Vec::new(),
             track_filtered: Vec::new(),
             loading_tracks: false,
-            filter_mode: false,
             status_msg: String::new(),
             should_quit: false,
             dirty: true,
@@ -276,7 +279,7 @@ impl App {
 
     /// Poll all async channels and dispatch results as Messages.
     async fn poll_async_results(&mut self) -> Result<()> {
-        if self.filter_mode {
+        if self.mode == AppMode::Filter {
             self.dirty = true;
         }
 
