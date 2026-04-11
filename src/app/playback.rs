@@ -153,8 +153,7 @@ impl App {
                 self.is_paused = false;
                 // Rebase play_started so elapsed resumes from where it was frozen.
                 self.play_started = Some(
-                    std::time::Instant::now()
-                        - std::time::Duration::from_secs_f64(self.elapsed),
+                    std::time::Instant::now() - std::time::Duration::from_secs_f64(self.elapsed),
                 );
             } else {
                 engine.pause()?;
