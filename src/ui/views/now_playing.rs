@@ -111,8 +111,10 @@ fn render_playing(
     let format_label = stream_bitrate
         .map(|b| format!(" {} ", b))
         .unwrap_or_default();
-    let queue_label = if queue_len > 0 {
+    let queue_label = if queue_len > 0 && queue_total > 0.0 {
         format!(" {} \u{00b7} {} ", queue_len, format_duration(queue_total))
+    } else if queue_total > 0.0 {
+        format!("{} ", format_duration(queue_total))
     } else {
         String::new()
     };
