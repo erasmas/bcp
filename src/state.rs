@@ -22,6 +22,12 @@ pub struct AppState {
     pub track_selected: Option<usize>,
     pub track_offset: usize,
     pub meta_scroll: usize,
+    #[serde(default)]
+    pub queue_visible: bool,
+    #[serde(default)]
+    pub queue_selected: Option<usize>,
+    #[serde(default)]
+    pub queue_offset: usize,
 }
 
 fn state_file() -> Result<PathBuf> {

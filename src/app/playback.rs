@@ -166,7 +166,7 @@ impl App {
         match self.focus {
             Column::Artists => self.download_artist_albums().await,
             Column::Albums => self.download_selected_album().await,
-            Column::Tracks => self.download_selected_track().await,
+            Column::Tracks | Column::Queue => self.download_selected_track().await,
         }
     }
 

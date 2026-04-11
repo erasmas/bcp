@@ -6,13 +6,14 @@ use ratatui::{
 };
 use ratatui_image::StatefulImage;
 
-use super::{App, AppScreen, Column, LoginStep};
+use super::{App, AppMode, AppScreen, Column, LoginStep};
 use crate::ui::logo::{LOGO, logo_gradient};
 use crate::ui::theme;
 use crate::ui::views::album::TrackColumn;
 use crate::ui::views::artist_column::ArtistColumn;
 use crate::ui::views::collection::AlbumColumn;
 use crate::ui::views::now_playing::NowPlayingBar;
+use crate::ui::views::queue::QueueColumn;
 use crate::ui::views::settings::SettingsView;
 
 impl App {
@@ -117,6 +118,18 @@ impl App {
 
         // Now playing bar
         let has_art = self.art_protocol.is_some();
+        let (queue_remaining_tracks, queue_remaining_time) = if let Some(cur) = self.queue.current {
+            let after = &self.queue.items[cur.saturating_add(1).min(self.queue.items.len())..];
+            let current_left = self
+                .queue
+                .current_item()
+                .map(|i| (i.track.duration - self.elapsed).max(0.0))
+                .unwrap_or(0.0);
+            let subsequent: f64 = after.iter().map(|i| i.track.duration).sum();
+            (after.len(), current_left + subsequent)
+        } else {
+            (0, 0.0)
+        };
         let now_playing = NowPlayingBar {
             current: self.queue.current_item(),
             is_paused: self.is_paused,
@@ -124,6 +137,8 @@ impl App {
             has_art,
             meta_scroll: self.meta_scroll,
             stream_bitrate: self.stream_bitrate.as_deref(),
+            queue_len: queue_remaining_tracks,
+            queue_total: queue_remaining_time,
         };
         let np_area = chunks[0];
         self.np_rect = np_area;
@@ -136,27 +151,48 @@ impl App {
             frame.render_stateful_widget(art_widget, art_rect, protocol);
         }
 
-        // Three-column layout
+        // Three-column layout — sliding window over four logical columns.
+        // When Queue is focused: [Albums | Tracks | Queue]
+        // Otherwise:             [Artists | Albums | Tracks]
         let columns = Layout::horizontal([
             Constraint::Fill(1),
             Constraint::Fill(1),
             Constraint::Fill(1),
         ])
         .split(chunks[1]);
-        self.artist_rect = columns[0];
-        self.album_rect = columns[1];
-        self.track_rect = columns[2];
 
-        // Column 1: Artists
-        let artist_view = ArtistColumn {
-            artists: &self.artist_index.artists,
-            filtered_indices: &self.artist_filtered,
-            focused: self.focus == Column::Artists,
-        };
-        frame.render_stateful_widget(artist_view, columns[0], &mut self.artist_state);
+        // Sliding window: show [Albums | Tracks | Queue] while queue_visible,
+        // otherwise [Artists | Albums | Tracks]. The viewport only resets when
+        // focus moves all the way back to Artists.
+        if self.queue_visible {
+            self.artist_rect = Rect::ZERO;
+            self.album_rect = columns[0];
+            self.track_rect = columns[1];
+            self.queue_rect = columns[2];
+        } else {
+            self.artist_rect = columns[0];
+            self.album_rect = columns[1];
+            self.track_rect = columns[2];
+            self.queue_rect = Rect::ZERO;
+        }
 
-        // Column 2: Albums for selected artist
+        // Column 1: Artists (hidden while queue panel is open)
+        if !self.queue_visible {
+            let artist_view = ArtistColumn {
+                artists: &self.artist_index.artists,
+                filtered_indices: &self.artist_filtered,
+                focused: self.focus == Column::Artists,
+            };
+            frame.render_stateful_widget(artist_view, columns[0], &mut self.artist_state);
+        }
+
+        // Column 1 (queue mode) / Column 2: Albums for selected artist
         let artist_albums = self.current_artist_album_indices();
+        let album_col = if self.queue_visible {
+            columns[0]
+        } else {
+            columns[1]
+        };
         let album_view = AlbumColumn {
             albums: &self.albums,
             album_indices: &artist_albums,
@@ -164,13 +200,18 @@ impl App {
             library: &self.library,
             focused: self.focus == Column::Albums,
         };
-        frame.render_stateful_widget(album_view, columns[1], &mut self.album_state);
+        frame.render_stateful_widget(album_view, album_col, &mut self.album_state);
 
-        // Column 3: Tracks for selected album
+        // Column 2 (queue mode) / Column 3: Tracks for selected album
         let current = self.queue.current_item();
         let playing_album_id = current.map(|q| q.item_id);
         let playing_track_num = current.map(|q| q.track.track_num);
         let selected_album = self.selected_album_idx.and_then(|i| self.albums.get(i));
+        let track_col = if self.queue_visible {
+            columns[1]
+        } else {
+            columns[2]
+        };
         let track_view = TrackColumn {
             album: selected_album,
             playing_album_id,
@@ -180,12 +221,22 @@ impl App {
             focused: self.focus == Column::Tracks,
             loading: self.loading_tracks,
         };
-        frame.render_stateful_widget(track_view, columns[2], &mut self.track_state);
+        frame.render_stateful_widget(track_view, track_col, &mut self.track_state);
+
+        // Column 3: Queue (always rendered while queue panel is open)
+        if self.queue_visible {
+            let queue_view = QueueColumn {
+                items: &self.queue.items,
+                current: self.queue.current,
+                focused: self.focus == Column::Queue,
+            };
+            frame.render_stateful_widget(queue_view, columns[2], &mut self.queue_state);
+        }
 
         // Status bar
         let status_area = chunks[2];
 
-        if self.filter_mode {
+        if self.mode == AppMode::Filter {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -232,7 +283,7 @@ impl App {
         frame.render_widget(status, status_chunks[1]);
 
         // Settings overlay
-        if self.show_settings {
+        if let AppMode::Settings { scroll } = self.mode {
             let overlay_area = centered_rect(80, 80, chunks[1]);
             frame.render_widget(Clear, overlay_area);
             let username = self
@@ -250,6 +301,7 @@ impl App {
                 username,
                 album_count: self.albums.len(),
                 downloaded_count,
+                scroll,
             };
             frame.render_widget(view, overlay_area);
         }

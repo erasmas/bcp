@@ -20,6 +20,8 @@ pub struct NowPlayingBar<'a> {
     pub has_art: bool,
     pub meta_scroll: usize,
     pub stream_bitrate: Option<&'a str>,
+    pub queue_len: usize,
+    pub queue_total: f64,
 }
 
 impl<'a> NowPlayingBar<'a> {
@@ -71,6 +73,8 @@ impl<'a> Widget for NowPlayingBar<'a> {
                     self.elapsed,
                     self.meta_scroll,
                     self.stream_bitrate,
+                    self.queue_len,
+                    self.queue_total,
                 );
             }
             None => {
@@ -80,6 +84,7 @@ impl<'a> Widget for NowPlayingBar<'a> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_playing(
     area: Rect,
     buf: &mut Buffer,
@@ -88,6 +93,8 @@ fn render_playing(
     elapsed: f64,
     meta_scroll: usize,
     stream_bitrate: Option<&str>,
+    queue_len: usize,
+    queue_total: f64,
 ) {
     if area.width < 5 || area.height < 1 {
         return;
@@ -101,12 +108,20 @@ fn render_playing(
         format_duration(duration)
     );
 
-    // Line 1: icon + artist - track title + time, bitrate right-aligned
+    // Line 1: icon + artist - track title + time | queue info | bitrate (right-aligned)
     let format_label = stream_bitrate
         .map(|b| format!(" {} ", b))
         .unwrap_or_default();
+    let queue_label = if queue_len > 0 && queue_total > 0.0 {
+        format!(" {} \u{00b7} {} ", queue_len, format_duration(queue_total))
+    } else if queue_total > 0.0 {
+        format!("{} ", format_duration(queue_total))
+    } else {
+        String::new()
+    };
     let label_width = format_label.len() as u16;
-    let title_width = area.width.saturating_sub(label_width);
+    let queue_width = queue_label.len() as u16;
+    let title_width = area.width.saturating_sub(label_width + queue_width);
     let title_line = Line::from(vec![
         Span::styled(format!(" {} ", icon), theme::playing()),
         Span::styled(&item.artist_name, theme::normal()),
@@ -115,8 +130,16 @@ fn render_playing(
         Span::styled(format!("  {}", time_str), theme::dim()),
     ]);
     buf.set_line(area.x, area.y, &title_line, title_width);
+    if queue_width > 0 {
+        buf.set_string(area.x + title_width, area.y, &queue_label, theme::dim());
+    }
     if label_width > 0 {
-        buf.set_string(area.x + title_width, area.y, &format_label, theme::dim());
+        buf.set_string(
+            area.x + title_width + queue_width,
+            area.y,
+            &format_label,
+            theme::dim(),
+        );
     }
 
     // Line 2: thin progress line
