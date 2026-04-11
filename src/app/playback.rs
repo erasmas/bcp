@@ -153,9 +153,13 @@ impl App {
             if self.is_paused {
                 engine.resume()?;
                 self.is_paused = false;
+                if let Some(ps) = self.pause_started.take() {
+                    self.pause_accumulated += ps.elapsed().as_secs_f64();
+                }
             } else {
                 engine.pause()?;
                 self.is_paused = true;
+                self.pause_started = Some(std::time::Instant::now());
             }
         }
         Ok(())

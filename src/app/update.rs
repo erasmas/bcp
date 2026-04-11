@@ -717,6 +717,7 @@ impl App {
                     self.is_paused = false;
                     self.play_started = Some(std::time::Instant::now());
                     self.pause_accumulated = 0.0;
+                    self.pause_started = None;
                     self.elapsed = 0.0;
                     self.meta_scroll = 0;
                     self.status_msg = String::new();
