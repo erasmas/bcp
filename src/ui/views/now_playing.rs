@@ -84,6 +84,7 @@ impl<'a> Widget for NowPlayingBar<'a> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_playing(
     area: Rect,
     buf: &mut Buffer,
