@@ -725,6 +725,9 @@ impl App {
                 if let Some(pos) = self.pending_seek.take() {
                     self.seek_by(pos);
                 }
+                if std::mem::take(&mut self.pending_pause) {
+                    let _ = self.toggle_pause();
+                }
             }
             Message::Mp3Failed(e) => {
                 self.status_msg = format!("Stream error: {}", e);

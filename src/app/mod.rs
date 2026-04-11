@@ -134,6 +134,7 @@ pub struct App {
     pub(crate) art_rx: Option<tokio::sync::oneshot::Receiver<Option<image::DynamicImage>>>,
     pub(crate) engine: Option<AudioEngine>,
     pub(crate) pending_seek: Option<f64>,
+    pub(crate) pending_pause: bool,
     pub(crate) client: Option<BandcampClient>,
     // Cached rects for mouse hit-testing, refreshed each draw.
     pub(crate) artist_rect: Rect,
@@ -189,6 +190,7 @@ impl App {
             art_rx: None,
             engine: None,
             pending_seek: None,
+            pending_pause: false,
             client: None,
             artist_rect: Rect::ZERO,
             album_rect: Rect::ZERO,
@@ -793,6 +795,7 @@ impl App {
             if state.elapsed > 0.0 {
                 self.pending_seek = Some(state.elapsed);
             }
+            self.pending_pause = state.is_paused;
             self.start_playback();
         }
 
