@@ -118,7 +118,19 @@ impl App {
 
         // Now playing bar
         let has_art = self.art_protocol.is_some();
-        let queue_total = self.queue.items.iter().map(|i| i.track.duration).sum();
+        let (queue_remaining_tracks, queue_remaining_time) =
+            if let Some(cur) = self.queue.current {
+                let after = &self.queue.items[cur.saturating_add(1).min(self.queue.items.len())..];
+                let current_left = self
+                    .queue
+                    .current_item()
+                    .map(|i| (i.track.duration - self.elapsed).max(0.0))
+                    .unwrap_or(0.0);
+                let subsequent: f64 = after.iter().map(|i| i.track.duration).sum();
+                (after.len(), current_left + subsequent)
+            } else {
+                (0, 0.0)
+            };
         let now_playing = NowPlayingBar {
             current: self.queue.current_item(),
             is_paused: self.is_paused,
@@ -126,8 +138,8 @@ impl App {
             has_art,
             meta_scroll: self.meta_scroll,
             stream_bitrate: self.stream_bitrate.as_deref(),
-            queue_len: self.queue.items.len(),
-            queue_total,
+            queue_len: queue_remaining_tracks,
+            queue_total: queue_remaining_time,
         };
         let np_area = chunks[0];
         self.np_rect = np_area;
