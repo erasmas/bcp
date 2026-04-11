@@ -97,6 +97,7 @@ impl Message {
             Self::DownloadAll => Some(("D", "download all")),
             // UI
             Self::ToggleSettings => Some(("?", "info")),
+            Self::ScrollSettings(_) => None,
             Self::Refresh => Some(("r", "refresh")),
             Self::Yank => Some(("y", "yank link")),
             // Internal (login, async results)
@@ -188,6 +189,7 @@ pub enum Message {
 
     // UI
     ToggleSettings,
+    ScrollSettings(i16),
     Refresh,
     Yank,
     // Login
@@ -488,6 +490,14 @@ impl App {
             // -- UI --
             Message::ToggleSettings => {
                 self.show_settings = !self.show_settings;
+                self.settings_scroll = 0;
+            }
+            Message::ScrollSettings(delta) => {
+                if delta > 0 {
+                    self.settings_scroll = self.settings_scroll.saturating_add(delta as u16);
+                } else {
+                    self.settings_scroll = self.settings_scroll.saturating_sub((-delta) as u16);
+                }
             }
             Message::Refresh => {
                 cache::invalidate_cache()?;

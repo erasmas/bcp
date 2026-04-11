@@ -250,6 +250,7 @@ impl App {
                 username,
                 album_count: self.albums.len(),
                 downloaded_count,
+                scroll: self.settings_scroll,
             };
             frame.render_widget(view, overlay_area);
         }

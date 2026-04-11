@@ -89,6 +89,7 @@ pub struct App {
     pub screen: AppScreen,
     pub focus: Column,
     pub show_settings: bool,
+    pub settings_scroll: u16,
     pub albums: Vec<Album>,
     pub artist_index: ArtistIndex,
     pub queue: PlayQueue,
@@ -139,6 +140,7 @@ impl App {
             screen: AppScreen::Login,
             focus: Column::Artists,
             show_settings: false,
+            settings_scroll: 0,
             albums: Vec::new(),
             artist_index: ArtistIndex {
                 artists: Vec::new(),

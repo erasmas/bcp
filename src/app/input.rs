@@ -27,6 +27,8 @@ impl App {
                     return match key.code {
                         KeyCode::Esc | KeyCode::Char('?') => Some(Message::ToggleSettings),
                         KeyCode::Char('q') => Some(Message::Quit),
+                        KeyCode::Char('j') | KeyCode::Down => Some(Message::ScrollSettings(1)),
+                        KeyCode::Char('k') | KeyCode::Up => Some(Message::ScrollSettings(-1)),
                         _ => None,
                     };
                 }
@@ -111,8 +113,15 @@ impl App {
 
     /// Pure mapping from a mouse event to zero or more messages.
     pub(crate) fn map_mouse(&self, ev: MouseEvent) -> Vec<Message> {
-        if self.screen != AppScreen::Main || self.show_settings || self.filter_mode {
+        if self.screen != AppScreen::Main || self.filter_mode {
             return Vec::new();
+        }
+        if self.show_settings {
+            return match ev.kind {
+                MouseEventKind::ScrollDown => vec![Message::ScrollSettings(1)],
+                MouseEventKind::ScrollUp => vec![Message::ScrollSettings(-1)],
+                _ => Vec::new(),
+            };
         }
 
         let x = ev.column;
