@@ -135,9 +135,11 @@ impl App {
             return;
         }
 
-        if let Some(filtered_pos) = self.track_filtered.iter().position(|&ti| {
-            album.tracks.get(ti).map(|t| t.track_num) == Some(playing_track_num)
-        }) {
+        if let Some(filtered_pos) = self
+            .track_filtered
+            .iter()
+            .position(|&ti| album.tracks.get(ti).map(|t| t.track_num) == Some(playing_track_num))
+        {
             self.track_state.select(Some(filtered_pos));
         }
     }
