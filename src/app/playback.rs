@@ -163,6 +163,18 @@ impl App {
         Ok(())
     }
 
+    /// Resolve the download page URL for an album by its sale_item_id.
+    fn download_url_for(&self, album: &crate::bandcamp::models::Album) -> Option<String> {
+        // Try sale_item_id first, then item_id (which is often the sale_item_id
+        // due to how fetch_full_collection prefers sale_item_id as the id)
+        if let Some(sale_id) = album.sale_item_id
+            && let Some(url) = self.redownload_urls.get(&sale_id)
+        {
+            return Some(url.clone());
+        }
+        self.redownload_urls.get(&album.item_id).cloned()
+    }
+
     /// Context-sensitive download based on focused column.
     pub(crate) async fn download_context(&mut self) {
         match self.focus {
@@ -217,7 +229,8 @@ impl App {
             let entry = library::prepare_album_entry(album);
             self.library.albums.insert(album.item_id, entry);
 
-            if let Ok(rx) = library::download_album(album, &cookie) {
+            let dl_url = self.download_url_for(album);
+            if let Ok(rx) = library::download_album(album, &cookie, dl_url) {
                 self.download_rx.push(rx);
                 count += 1;
             }
@@ -277,7 +290,8 @@ impl App {
         self.library.albums.insert(album.item_id, entry);
         let _ = self.library.save();
 
-        match library::download_album(album, cookie) {
+        let dl_url = self.download_url_for(album);
+        match library::download_album(album, cookie, dl_url) {
             Ok(rx) => {
                 self.download_rx.push(rx);
                 self.status_msg =
@@ -331,7 +345,8 @@ impl App {
         let track_num = track.track_num;
         let track_title = track.title.clone();
 
-        match library::download_track(album, track_num, cookie) {
+        let dl_url = self.download_url_for(album);
+        match library::download_track(album, track_num, cookie, dl_url) {
             Ok(rx) => {
                 self.download_rx.push(rx);
                 self.status_msg = format!("Downloading track: {}", track_title);
@@ -384,7 +399,8 @@ impl App {
             let entry = library::prepare_album_entry(album);
             self.library.albums.insert(album.item_id, entry);
 
-            if let Ok(rx) = library::download_album(album, &cookie) {
+            let dl_url = self.download_url_for(album);
+            if let Ok(rx) = library::download_album(album, &cookie, dl_url) {
                 self.download_rx.push(rx);
                 count += 1;
             }

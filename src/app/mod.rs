@@ -138,6 +138,8 @@ pub struct App {
     pub(crate) pending_seek: Option<f64>,
     pub(crate) pending_pause: bool,
     pub(crate) client: Option<BandcampClient>,
+    /// sale_item_id -> download page URL for purchased music
+    pub(crate) redownload_urls: HashMap<u64, String>,
     // Cached rects for mouse hit-testing, refreshed each draw.
     pub(crate) artist_rect: Rect,
     pub(crate) album_rect: Rect,
@@ -193,6 +195,7 @@ impl App {
             pending_seek: None,
             pending_pause: false,
             client: None,
+            redownload_urls: HashMap::new(),
             artist_rect: Rect::ZERO,
             album_rect: Rect::ZERO,
             track_rect: Rect::ZERO,
@@ -212,8 +215,9 @@ impl App {
     }
 
     pub async fn load_collection(&mut self) -> Result<()> {
-        if let Some(cached) = cache::load_cached_collection()? {
+        if let Some((cached, redownload_urls)) = cache::load_cached_collection()? {
             self.albums = cached;
+            self.redownload_urls = redownload_urls;
             self.rebuild_artist_index();
             self.screen = AppScreen::Main;
             if !self.artist_index.artists.is_empty() {
@@ -249,8 +253,10 @@ impl App {
         };
 
         self.status_msg = "Fetching collection...".to_string();
-        self.albums = client.fetch_full_collection(fan_id).await?;
-        cache::save_collection_cache(&self.albums)?;
+        let (albums, redownload_urls) = client.fetch_full_collection(fan_id).await?;
+        self.albums = albums;
+        self.redownload_urls = redownload_urls;
+        cache::save_collection_cache(&self.albums, &self.redownload_urls)?;
         self.rebuild_artist_index();
 
         self.screen = AppScreen::Main;
@@ -374,6 +380,17 @@ impl App {
         for (i, rx) in self.download_rx.iter_mut().enumerate() {
             while let Ok(event) = rx.try_recv() {
                 match event {
+                    DownloadEvent::Progress {
+                        item_id,
+                        downloaded,
+                        total,
+                    } => {
+                        messages.push(Message::DownloadProgress {
+                            item_id,
+                            downloaded,
+                            total,
+                        });
+                    }
                     DownloadEvent::TrackDone { item_id, track_num } => {
                         messages.push(Message::DownloadTrackDone { item_id, track_num });
                     }
@@ -833,6 +850,7 @@ impl App {
                 about: None,
                 credits: None,
                 release_date: None,
+                sale_item_id: None,
             });
         }
     }

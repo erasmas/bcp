@@ -12,6 +12,8 @@ pub struct Album {
     pub about: Option<String>,
     pub credits: Option<String>,
     pub release_date: Option<String>,
+    #[serde(default)]
+    pub sale_item_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +38,8 @@ pub struct CollectionResponse {
     pub items: Vec<CollectionItem>,
     pub more_available: bool,
     pub last_token: Option<String>,
+    #[serde(default)]
+    pub redownload_urls: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]

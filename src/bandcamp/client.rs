@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use reqwest::header::{COOKIE, USER_AGENT};
 
@@ -108,14 +110,30 @@ impl BandcampClient {
         Ok(data)
     }
 
-    /// Fetch all collection pages
-    pub async fn fetch_full_collection(&self, fan_id: u64) -> Result<Vec<Album>> {
+    /// Fetch all collection pages.
+    /// Returns (albums, redownload_urls) where redownload_urls maps sale_item_id -> download page URL.
+    pub async fn fetch_full_collection(
+        &self,
+        fan_id: u64,
+    ) -> Result<(Vec<Album>, HashMap<u64, String>)> {
         let mut albums = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
+        let mut redownload_urls = HashMap::new();
         let mut token: Option<String> = None;
 
         loop {
             let resp = self.fetch_collection(fan_id, token.as_deref()).await?;
+
+            // Collect redownload URLs from each page
+            for (key, url) in &resp.redownload_urls {
+                // Keys are like "p301567301" - strip letter prefix and extract numeric sale_item_id
+                let numeric_part = key
+                    .strip_prefix(|c: char| c.is_ascii_alphabetic())
+                    .unwrap_or(key);
+                if let Ok(sale_id) = numeric_part.parse::<u64>() {
+                    redownload_urls.insert(sale_id, url.clone());
+                }
+            }
 
             for item in &resp.items {
                 let id = item.sale_item_id.or(item.item_id).unwrap_or(0);
@@ -133,6 +151,7 @@ impl BandcampClient {
                     about: None,
                     credits: None,
                     release_date: None,
+                    sale_item_id: item.sale_item_id,
                 };
                 albums.push(album);
             }
@@ -146,7 +165,7 @@ impl BandcampClient {
             }
         }
 
-        Ok(albums)
+        Ok((albums, redownload_urls))
     }
 
     /// Fetch track listing, stream URLs, and album metadata
@@ -180,6 +199,15 @@ pub struct AlbumDetail {
     pub release_date: Option<String>,
 }
 
+/// Per-format download URLs for a purchased item.
+pub(crate) struct DownloadFormats {
+    pub(crate) formats: HashMap<String, FormatDownload>,
+}
+
+pub(crate) struct FormatDownload {
+    pub(crate) url: String,
+}
+
 fn parse_album_page(html: &str) -> Result<AlbumDetail> {
     let tralbum_json =
         extract_data_tralbum(html).context("Could not find track data on album page")?;
@@ -192,9 +220,6 @@ fn parse_album_page(html: &str) -> Result<AlbumDetail> {
         .unwrap_or_default()
         .into_iter()
         .map(|t| {
-            // TODO: Bandcamp only embeds mp3-128 in page JSON even for purchased music.
-            // Higher quality streams (mp3-v0 etc.) require a separate authenticated API
-            // endpoint that the official app uses but isn't publicly documented.
             let stream_url = t
                 .file
                 .as_ref()
@@ -231,6 +256,53 @@ fn extract_data_tralbum(html: &str) -> Option<String> {
     let json = element.attr("data-tralbum")?;
 
     Some(json.to_string())
+}
+
+fn extract_data_blob(html: &str) -> Option<serde_json::Value> {
+    use scraper::{Html, Selector};
+
+    let document = Html::parse_document(html);
+    let selector = Selector::parse("[data-blob]").ok()?;
+    let element = document.select(&selector).next()?;
+    let json = element.attr("data-blob")?;
+
+    serde_json::from_str(json).ok()
+}
+
+/// Extract per-format download URLs from HTML.
+pub(crate) fn extract_download_formats_from_html(html: &str) -> Result<DownloadFormats> {
+    extract_download_formats(html)
+}
+
+/// Extract per-format download URLs from a download page's data-blob.
+fn extract_download_formats(html: &str) -> Result<DownloadFormats> {
+    let blob = extract_data_blob(html).context("Could not find data-blob on download page")?;
+
+    let items = blob
+        .get("download_items")
+        .and_then(|v| v.as_array())
+        .context("No download_items in download page data")?;
+
+    let item = items.first().context("download_items is empty")?;
+
+    let downloads = item
+        .get("downloads")
+        .and_then(|v| v.as_object())
+        .context("No downloads in download item")?;
+
+    let mut formats = HashMap::new();
+    for (fmt, info) in downloads {
+        if let Some(url) = info.get("url").and_then(|v| v.as_str()) {
+            formats.insert(
+                fmt.clone(),
+                FormatDownload {
+                    url: url.to_string(),
+                },
+            );
+        }
+    }
+
+    Ok(DownloadFormats { formats })
 }
 
 /// Parse album page HTML, exposed for testing.

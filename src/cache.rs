@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -10,13 +12,17 @@ use crate::config;
 struct CachedCollection {
     albums: Vec<Album>,
     timestamp: u64,
+    #[serde(default)]
+    redownload_urls: HashMap<u64, String>,
 }
 
 fn cache_file() -> Result<PathBuf> {
     Ok(config::cache_dir()?.join("collection.json"))
 }
 
-pub fn load_cached_collection() -> Result<Option<Vec<Album>>> {
+type CachedData = (Vec<Album>, HashMap<u64, String>);
+
+pub fn load_cached_collection() -> Result<Option<CachedData>> {
     let path = cache_file()?;
     if !path.exists() {
         return Ok(None);
@@ -25,10 +31,13 @@ pub fn load_cached_collection() -> Result<Option<Vec<Album>>> {
     let data = std::fs::read_to_string(&path)?;
     let cached: CachedCollection = serde_json::from_str(&data)?;
 
-    Ok(Some(cached.albums))
+    Ok(Some((cached.albums, cached.redownload_urls)))
 }
 
-pub fn save_collection_cache(albums: &[Album]) -> Result<()> {
+pub fn save_collection_cache(
+    albums: &[Album],
+    redownload_urls: &HashMap<u64, String>,
+) -> Result<()> {
     let path = cache_file()?;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -38,6 +47,7 @@ pub fn save_collection_cache(albums: &[Album]) -> Result<()> {
     let cached = CachedCollection {
         albums: albums.to_vec(),
         timestamp: now,
+        redownload_urls: redownload_urls.clone(),
     };
 
     let data = serde_json::to_string(&cached)?;
