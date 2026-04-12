@@ -103,9 +103,7 @@ impl App {
     pub(crate) fn play_next(&mut self) {
         if self.queue.next().is_some() {
             self.start_playback();
-            if let Some(idx) = self.queue.current {
-                self.track_state.select(Some(idx));
-            }
+            self.sync_track_state_to_queue();
         } else {
             self.status_msg = "End of queue".to_string();
             self.play_started = None;
@@ -115,9 +113,32 @@ impl App {
     pub(crate) fn play_prev(&mut self) {
         if self.queue.prev().is_some() {
             self.start_playback();
-            if let Some(idx) = self.queue.current {
-                self.track_state.select(Some(idx));
-            }
+            self.sync_track_state_to_queue();
+        }
+    }
+
+    /// Update `track_state` selection to reflect the currently playing queue item,
+    /// but only when the viewed album matches the playing album. Uses `track_filtered`
+    /// indices so it is correct whether or not a search filter is active.
+    pub(crate) fn sync_track_state_to_queue(&mut self) {
+        let Some(item) = self.queue.current_item() else {
+            return;
+        };
+        let playing_item_id = item.item_id;
+        let playing_track_num = item.track.track_num;
+
+        let Some(album_idx) = self.selected_album_idx else {
+            return;
+        };
+        let album = &self.albums[album_idx];
+        if album.item_id != playing_item_id {
+            return;
+        }
+
+        if let Some(filtered_pos) = self.track_filtered.iter().position(|&ti| {
+            album.tracks.get(ti).map(|t| t.track_num) == Some(playing_track_num)
+        }) {
+            self.track_state.select(Some(filtered_pos));
         }
     }
 
