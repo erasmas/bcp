@@ -269,13 +269,8 @@ fn extract_data_blob(html: &str) -> Option<serde_json::Value> {
     serde_json::from_str(json).ok()
 }
 
-/// Extract per-format download URLs from HTML.
-pub(crate) fn extract_download_formats_from_html(html: &str) -> Result<DownloadFormats> {
-    extract_download_formats(html)
-}
-
 /// Extract per-format download URLs from a download page's data-blob.
-fn extract_download_formats(html: &str) -> Result<DownloadFormats> {
+pub(crate) fn extract_download_formats(html: &str) -> Result<DownloadFormats> {
     let blob = extract_data_blob(html).context("Could not find data-blob on download page")?;
 
     let items = blob

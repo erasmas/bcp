@@ -106,13 +106,13 @@ impl LibraryIndex {
         }
 
         // Check other extensions (format may have changed since download)
-        let exts = ["flac", "mp3"];
         let stem = track
             .file_name
             .rsplit_once('.')
             .map(|(s, _)| s)
             .unwrap_or(&track.file_name);
-        for ext in exts {
+        for (fmt, _) in config::DOWNLOAD_FORMATS {
+            let ext = config::format_extension(fmt);
             let alt = dir.join(format!("{}.{}", stem, ext));
             if alt.exists() {
                 return Some(alt);
@@ -291,8 +291,7 @@ pub fn download_album(
                 tx: &tx,
             };
             let hq_tracks: Vec<_> = tracks.iter().map(|(n, t, _)| (*n, t.clone())).collect();
-            download_and_extract_hq(&ctx, &url, &fmt_key, &hq_tracks).await;
-            hq_ok = true;
+            hq_ok = download_and_extract_hq(&ctx, &url, &fmt_key, &hq_tracks).await;
         }
 
         // Fall back to stream URLs (mp3-128) for non-purchased or failed HQ downloads
@@ -376,7 +375,7 @@ async fn fetch_hq_download_url(
         .await
         .ok()?;
     let html = resp.text().await.ok()?;
-    let formats = crate::bandcamp::client::extract_download_formats_from_html(&html).ok()?;
+    let formats = crate::bandcamp::client::extract_download_formats(&html).ok()?;
 
     if let Some(dl) = formats.formats.get(preferred_format) {
         return Some((dl.url.clone(), preferred_format.to_string()));
@@ -398,16 +397,18 @@ struct HqDownloadCtx<'a> {
 }
 
 /// Download a HQ album file (usually a ZIP), streaming to a temp file, then extract tracks.
+/// Returns true if the download and extraction succeeded (at least partially).
 async fn download_and_extract_hq(
     ctx: &HqDownloadCtx<'_>,
     url: &str,
     fmt_key: &str,
     tracks: &[(u32, String)],
-) {
+) -> bool {
     use tokio::io::AsyncWriteExt;
 
     let item_id = ctx.item_id;
     let ext = config::format_extension(fmt_key);
+    const MAX_DOWNLOAD_SIZE: u64 = 2 * 1024 * 1024 * 1024; // 2 GB
 
     let resp = match ctx
         .client
@@ -422,19 +423,28 @@ async fn download_and_extract_hq(
                 item_id,
                 msg: format!("Download failed: HTTP {}", r.status()),
             });
-            return;
+            return false;
         }
         Err(e) => {
             let _ = ctx.tx.send(DownloadEvent::Error {
                 item_id,
                 msg: format!("Download request error: {}", e),
             });
-            return;
+            return false;
         }
     };
 
     // Stream response body to a temp file with progress reporting
     let total = resp.content_length();
+    if let Some(size) = total
+        && size > MAX_DOWNLOAD_SIZE
+    {
+        let _ = ctx.tx.send(DownloadEvent::Error {
+            item_id,
+            msg: format!("Download too large: {} MB", size / (1024 * 1024)),
+        });
+        return false;
+    }
     let tmp_path = ctx.dir.join(format!(".download-{}.tmp", item_id));
     let mut tmp_file = match tokio::fs::File::create(&tmp_path).await {
         Ok(f) => f,
@@ -443,7 +453,7 @@ async fn download_and_extract_hq(
                 item_id,
                 msg: format!("Failed to create temp file: {}", e),
             });
-            return;
+            return false;
         }
     };
 
@@ -453,15 +463,27 @@ async fn download_and_extract_hq(
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(bytes) => {
+                downloaded += bytes.len() as u64;
+                if downloaded > MAX_DOWNLOAD_SIZE {
+                    let _ = ctx.tx.send(DownloadEvent::Error {
+                        item_id,
+                        msg: format!(
+                            "Download exceeded size limit: {} MB",
+                            downloaded / (1024 * 1024)
+                        ),
+                    });
+                    drop(tmp_file);
+                    let _ = tokio::fs::remove_file(&tmp_path).await;
+                    return false;
+                }
                 if let Err(e) = tmp_file.write_all(&bytes).await {
                     let _ = ctx.tx.send(DownloadEvent::Error {
                         item_id,
                         msg: format!("Write error: {}", e),
                     });
                     let _ = tokio::fs::remove_file(&tmp_path).await;
-                    return;
+                    return false;
                 }
-                downloaded += bytes.len() as u64;
                 let _ = ctx.tx.send(DownloadEvent::Progress {
                     item_id,
                     downloaded,
@@ -474,7 +496,7 @@ async fn download_and_extract_hq(
                     msg: format!("Download stream error: {}", e),
                 });
                 let _ = tokio::fs::remove_file(&tmp_path).await;
-                return;
+                return false;
             }
         }
     }
@@ -499,18 +521,28 @@ async fn download_and_extract_hq(
     })
     .await;
 
-    if let Err(e) = extract_result {
-        let _ = ctx.tx.send(DownloadEvent::Error {
-            item_id,
-            msg: format!("Extraction task failed: {}", e),
-        });
+    match extract_result {
+        Ok(moved_tmp) => {
+            // If extract_downloaded_file renamed the temp file (raw audio),
+            // it's already gone - no cleanup needed
+            if !moved_tmp {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+            }
+            true
+        }
+        Err(e) => {
+            let _ = ctx.tx.send(DownloadEvent::Error {
+                item_id,
+                msg: format!("Extraction task failed: {}", e),
+            });
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            false
+        }
     }
-
-    // Clean up temp file
-    let _ = tokio::fs::remove_file(&tmp_path).await;
 }
 
 /// Extract tracks from a downloaded file (ZIP or raw audio). Runs on a blocking thread.
+/// Returns true if the temp file was moved (renamed) and should not be deleted by the caller.
 fn extract_downloaded_file(
     tmp_path: &std::path::Path,
     dir: &std::path::Path,
@@ -518,7 +550,7 @@ fn extract_downloaded_file(
     tracks: &[(u32, String)],
     item_id: u64,
     tx: &tokio::sync::mpsc::UnboundedSender<DownloadEvent>,
-) {
+) -> bool {
     let file = match std::fs::File::open(tmp_path) {
         Ok(f) => f,
         Err(e) => {
@@ -526,7 +558,7 @@ fn extract_downloaded_file(
                 item_id,
                 msg: format!("Failed to open download: {}", e),
             });
-            return;
+            return false;
         }
     };
 
@@ -574,6 +606,7 @@ fn extract_downloaded_file(
                 }
             }
         }
+        false
     } else {
         // Raw audio file (single track purchase) - just rename the temp file
         if let Some((track_num, title)) = tracks.first() {
@@ -584,8 +617,10 @@ fn extract_downloaded_file(
                     item_id,
                     track_num: *track_num,
                 });
+                return true; // temp file was moved, caller should not delete it
             }
         }
+        false
     }
 }
 
