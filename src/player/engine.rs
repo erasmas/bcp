@@ -155,3 +155,23 @@ fn play_mp3(stream: &OutputStream, data: &[u8]) -> Result<Sink> {
     sink.append(source);
     Ok(sink)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_flac_seek_in_memory() {
+        let flac_data = include_bytes!("../../tests/fixtures/test.flac");
+        
+        // Initialise audio just to get the stream handle (required for Sink)
+        let stream = rodio::OutputStreamBuilder::open_default_stream().unwrap();
+        
+        // Attempt decoding and seeking via the player's stream load mechanism
+        let sink = play_mp3(&stream, flac_data).expect("Failed to play FLAC");
+        
+        // Attempt to seek to 0.5s into the track stream
+        sink.try_seek(Duration::from_millis(500)).expect("Failed to seek FLAC cursor");
+    }
+}
