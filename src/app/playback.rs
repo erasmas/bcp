@@ -180,7 +180,7 @@ impl App {
         match self.focus {
             Column::Artists => self.download_artist_albums().await,
             Column::Albums => self.download_selected_album().await,
-            Column::Tracks | Column::Queue => self.download_selected_track().await,
+            Column::Tracks | Column::Queue => self.download_selected_album().await,
         }
     }
 
@@ -296,60 +296,6 @@ impl App {
                 self.download_rx.push(rx);
                 self.status_msg =
                     format!("Downloading: {} - {}", album.artist_name, album.album_title);
-            }
-            Err(e) => {
-                self.status_msg = format!("Download error: {}", e);
-            }
-        }
-        self.dirty = true;
-    }
-
-    async fn download_selected_track(&mut self) {
-        let Some(album_idx) = self.selected_album_idx else {
-            return;
-        };
-        let Some(selected) = self.track_state.selected() else {
-            return;
-        };
-        let Some(&track_idx) = self.track_filtered.get(selected) else {
-            return;
-        };
-
-        let album = &self.albums[album_idx];
-        let Some(track) = album.tracks.get(track_idx) else {
-            return;
-        };
-
-        if self
-            .library
-            .is_track_downloaded(album.item_id, track.track_num)
-        {
-            self.status_msg = "Track already downloaded".to_string();
-            return;
-        }
-
-        let cookie = self
-            .auth
-            .as_ref()
-            .map(|a| a.identity_cookie.as_str())
-            .unwrap_or("");
-
-        // Ensure album entry exists in library
-        if let std::collections::hash_map::Entry::Vacant(e) =
-            self.library.albums.entry(album.item_id)
-        {
-            e.insert(library::prepare_album_entry(album));
-            let _ = self.library.save();
-        }
-
-        let track_num = track.track_num;
-        let track_title = track.title.clone();
-
-        let dl_url = self.download_url_for(album);
-        match library::download_track(album, track_num, cookie, dl_url) {
-            Ok(rx) => {
-                self.download_rx.push(rx);
-                self.status_msg = format!("Downloading track: {}", track_title);
             }
             Err(e) => {
                 self.status_msg = format!("Download error: {}", e);

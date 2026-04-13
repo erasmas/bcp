@@ -280,7 +280,8 @@ pub fn download_album(
         // Try HQ download via download page first
         let mut hq_ok = false;
         if let Some(dl_url) = download_page_url
-            && let Some((url, fmt_key)) = fetch_hq_download_url(&client, &cookie, &dl_url, &preferred_format).await
+            && let Some((url, fmt_key)) =
+                fetch_hq_download_url(&client, &cookie, &dl_url, &preferred_format).await
         {
             let ctx = HqDownloadCtx {
                 client: &client,
@@ -289,8 +290,7 @@ pub fn download_album(
                 item_id,
                 tx: &tx,
             };
-            let hq_tracks: Vec<_> =
-                tracks.iter().map(|(n, t, _)| (*n, t.clone())).collect();
+            let hq_tracks: Vec<_> = tracks.iter().map(|(n, t, _)| (*n, t.clone())).collect();
             download_and_extract_hq(&ctx, &url, &fmt_key, &hq_tracks).await;
             hq_ok = true;
         }
@@ -356,103 +356,6 @@ pub fn download_album(
         }
 
         let _ = tx.send(DownloadEvent::AlbumDone { item_id });
-    });
-
-    Ok(rx)
-}
-
-/// Spawn a background task to download a single track from an album.
-/// Falls back to the stream URL (mp3-128) when no download page URL is available.
-pub fn download_track(
-    album: &Album,
-    track_num: u32,
-    identity_cookie: &str,
-    download_page_url: Option<String>,
-) -> Result<mpsc::UnboundedReceiver<DownloadEvent>> {
-    let (tx, rx) = mpsc::unbounded_channel();
-    let base = config::library_dir()?;
-    let dir = album_dir(&base, &album.artist_name, &album.album_title);
-    std::fs::create_dir_all(&dir)?;
-
-    let item_id = album.item_id;
-    let track = album
-        .tracks
-        .iter()
-        .find(|t| t.track_num == track_num)
-        .context("Track not found")?;
-    let title = track.title.clone();
-    let stream_url = track.stream_url.clone();
-    let cookie = identity_cookie.to_string();
-    let preferred_format = config::download_format();
-
-    tokio::spawn(async move {
-        let client = reqwest::Client::new();
-
-        // Try HQ download via download page first.
-        // Note: this downloads the full album ZIP even for a single track, since
-        // Bandcamp only offers per-album downloads. Only the requested track is extracted.
-        if let Some(dl_url) = download_page_url
-            && let Some((url, fmt_key)) = fetch_hq_download_url(&client, &cookie, &dl_url, &preferred_format).await
-        {
-            let track_info = vec![(track_num, title)];
-            let ctx = HqDownloadCtx {
-                client: &client,
-                cookie: &cookie,
-                dir: &dir,
-                item_id,
-                tx: &tx,
-            };
-            download_and_extract_hq(&ctx, &url, &fmt_key, &track_info).await;
-            return;
-        }
-
-        // Fall back to stream URL (mp3-128)
-        let Some(url) = stream_url else {
-            let _ = tx.send(DownloadEvent::Error {
-                item_id,
-                msg: format!("No download or stream URL for track {}", track_num),
-            });
-            return;
-        };
-
-        let file_name = track_filename(track_num, &title, "mp3");
-        let file_path = dir.join(&file_name);
-        if file_path.exists() {
-            let _ = tx.send(DownloadEvent::TrackDone { item_id, track_num });
-            return;
-        }
-
-        match client
-            .get(&url)
-            .header("Cookie", format!("identity={}", cookie))
-            .send()
-            .await
-        {
-            Ok(resp) => match resp.bytes().await {
-                Ok(bytes) => {
-                    if let Err(e) = std::fs::write(&file_path, &bytes) {
-                        let _ = tx.send(DownloadEvent::Error {
-                            item_id,
-                            msg: format!("Write error: {}", e),
-                        });
-                        return;
-                    }
-                    let _ = tx.send(DownloadEvent::TrackDone { item_id, track_num });
-                }
-                Err(e) => {
-                    let _ = tx.send(DownloadEvent::Error {
-                        item_id,
-                        msg: format!("Download error: {}", e),
-                    });
-                }
-            },
-            Err(e) => {
-                let _ = tx.send(DownloadEvent::Error {
-                    item_id,
-                    msg: format!("Request error: {}", e),
-                });
-            }
-        }
     });
 
     Ok(rx)
