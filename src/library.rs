@@ -106,7 +106,7 @@ impl LibraryIndex {
         }
 
         // Check other extensions (format may have changed since download)
-        let exts = ["flac", "mp3", "wav", "aiff", "m4a", "ogg"];
+        let exts = ["flac", "mp3"];
         let stem = track
             .file_name
             .rsplit_once('.')

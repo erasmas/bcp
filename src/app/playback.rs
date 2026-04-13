@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::{App, Column};
 use crate::library;
@@ -46,12 +46,47 @@ impl App {
             self.status_msg = format!("Buffering: {} - {}...", item.artist_name, item.track.title);
 
             let stream_url = url.clone();
+            let album_url = item.item_url.clone();
+            let track_num = item.track.track_num;
+            let cookie = self
+                .auth
+                .as_ref()
+                .map(|a| a.identity_cookie.clone())
+                .unwrap_or_default();
             let (mp3_tx, mp3_rx) = tokio::sync::oneshot::channel();
             self.mp3_rx = Some(mp3_rx);
             tokio::spawn(async move {
                 let client = reqwest::Client::new();
                 let result = async {
-                    let resp = client.get(&stream_url).send().await?;
+                    let mut req = client.get(&stream_url);
+                    if !cookie.is_empty() {
+                        req = req.header("Cookie", format!("identity={}", cookie));
+                    }
+                    let resp = req.send().await?;
+                    if resp.status() == reqwest::StatusCode::GONE {
+                        // Stream URL expired - re-fetch album page for fresh URLs
+                        let cookie_header = if cookie.is_empty() {
+                            String::new()
+                        } else {
+                            format!("identity={}", cookie)
+                        };
+                        let detail =
+                            crate::bandcamp::client::BandcampClient::fetch_album_details_static(
+                                &client,
+                                &cookie_header,
+                                &album_url,
+                            )
+                            .await?;
+                        let track = detail
+                            .tracks
+                            .iter()
+                            .find(|t| t.track_num == track_num)
+                            .and_then(|t| t.stream_url.as_ref())
+                            .context("No stream URL after refresh")?;
+                        let resp = client.get(track).send().await?;
+                        let bytes = resp.bytes().await?;
+                        return Ok(bytes.to_vec());
+                    }
                     let bytes = resp.bytes().await?;
                     Ok(bytes.to_vec()) as Result<Vec<u8>>
                 }

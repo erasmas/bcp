@@ -28,6 +28,8 @@ impl App {
                     KeyCode::Char('q') => Some(Message::Quit),
                     KeyCode::Char('j') | KeyCode::Down => Some(Message::ScrollSettings(1)),
                     KeyCode::Char('k') | KeyCode::Up => Some(Message::ScrollSettings(-1)),
+                    KeyCode::Char('h') | KeyCode::Left => Some(Message::CycleFormat(-1)),
+                    KeyCode::Char('l') | KeyCode::Right => Some(Message::CycleFormat(1)),
                     _ => None,
                 },
                 AppMode::Filter => {

@@ -58,7 +58,9 @@ impl<'a> Widget for SettingsView<'a> {
             ]),
             Line::from(vec![
                 Span::styled("  Format:       ", theme::dim()),
-                Span::styled(config::format_description(&dl_format), theme::normal()),
+                Span::styled("< ", theme::dim()),
+                Span::styled(config::format_description(&dl_format), theme::selected()),
+                Span::styled(" >", theme::dim()),
             ]),
             Line::from(""),
             Line::from(Span::styled("  Paths", theme::selected())),

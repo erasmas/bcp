@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use super::{App, AppMode, AppScreen, Column, LoginStep};
 use crate::bandcamp::models::Album;
+use crate::config;
 
 enum QueueOp {
     Append,
@@ -17,6 +18,7 @@ fn album_queue_items(album: &Album) -> Vec<QueueItem> {
             item_id: album.item_id,
             album_title: album.album_title.clone(),
             artist_name: album.artist_name.clone(),
+            item_url: album.item_url.clone(),
             art_url: album.art_url.clone(),
             about: album.about.clone(),
             credits: album.credits.clone(),
@@ -127,7 +129,7 @@ impl Message {
             Self::DownloadAll => Some(("D", "download all")),
             // UI
             Self::ToggleSettings => Some(("?", "info")),
-            Self::ScrollSettings(_) => None,
+            Self::CycleFormat(_) | Self::ScrollSettings(_) => None,
             Self::Refresh => Some(("r", "refresh")),
             Self::Yank => Some(("y", "yank link")),
             // Internal (login, async results)
@@ -222,6 +224,7 @@ pub enum Message {
 
     // UI
     ToggleSettings,
+    CycleFormat(i8),
     ScrollSettings(i16),
     Refresh,
     Yank,
@@ -593,6 +596,9 @@ impl App {
                     AppMode::Settings { .. } => AppMode::Normal,
                     _ => AppMode::Settings { scroll: 0 },
                 };
+            }
+            Message::CycleFormat(delta) => {
+                config::cycle_download_format(delta);
             }
             Message::ScrollSettings(delta) => {
                 if let AppMode::Settings { ref mut scroll } = self.mode {
@@ -976,6 +982,7 @@ impl App {
                     item_id: album.item_id,
                     album_title: album.album_title.clone(),
                     artist_name: album.artist_name.clone(),
+                    item_url: album.item_url.clone(),
                     art_url: album.art_url.clone(),
                     about: album.about.clone(),
                     credits: album.credits.clone(),
