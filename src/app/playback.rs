@@ -442,6 +442,7 @@ mod tests {
             about: None,
             credits: None,
             release_date: None,
+            sale_item_id: None,
         }
     }
 
@@ -454,6 +455,7 @@ mod tests {
                 item_id: album.item_id,
                 album_title: album.album_title.clone(),
                 artist_name: album.artist_name.clone(),
+                item_url: album.item_url.clone(),
                 art_url: None,
                 about: None,
                 credits: None,
