@@ -103,9 +103,7 @@ impl App {
     pub(crate) fn play_next(&mut self) {
         if self.queue.next().is_some() {
             self.start_playback();
-            if let Some(idx) = self.queue.current {
-                self.track_state.select(Some(idx));
-            }
+            self.sync_track_state_to_queue();
         } else {
             self.status_msg = "End of queue".to_string();
             self.play_started = None;
@@ -115,9 +113,34 @@ impl App {
     pub(crate) fn play_prev(&mut self) {
         if self.queue.prev().is_some() {
             self.start_playback();
-            if let Some(idx) = self.queue.current {
-                self.track_state.select(Some(idx));
-            }
+            self.sync_track_state_to_queue();
+        }
+    }
+
+    /// Update `track_state` selection to reflect the currently playing queue item,
+    /// but only when the viewed album matches the playing album. Uses `track_filtered`
+    /// indices so it is correct whether or not a search filter is active.
+    pub(crate) fn sync_track_state_to_queue(&mut self) {
+        let Some(item) = self.queue.current_item() else {
+            return;
+        };
+        let playing_item_id = item.item_id;
+        let playing_track_num = item.track.track_num;
+
+        let Some(album_idx) = self.selected_album_idx else {
+            return;
+        };
+        let album = &self.albums[album_idx];
+        if album.item_id != playing_item_id {
+            return;
+        }
+
+        if let Some(filtered_pos) = self
+            .track_filtered
+            .iter()
+            .position(|&ti| album.tracks.get(ti).map(|t| t.track_num) == Some(playing_track_num))
+        {
+            self.track_state.select(Some(filtered_pos));
         }
     }
 
@@ -393,5 +416,138 @@ impl App {
         let _ = self.library.save();
         self.status_msg = format!("Downloading {} albums...", count);
         self.dirty = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bandcamp::models::{Album, Track};
+    use crate::player::queue::QueueItem;
+
+    fn make_album(item_id: u64, track_nums: &[u32]) -> Album {
+        Album {
+            item_id,
+            album_title: format!("Album {item_id}"),
+            artist_name: "Artist".to_string(),
+            item_url: String::new(),
+            art_url: None,
+            date_added: None,
+            tracks: track_nums
+                .iter()
+                .map(|&n| Track {
+                    title: format!("Track {n}"),
+                    track_num: n,
+                    duration: 180.0,
+                    stream_url: None,
+                })
+                .collect(),
+            about: None,
+            credits: None,
+            release_date: None,
+        }
+    }
+
+    fn queue_items(album: &Album) -> Vec<QueueItem> {
+        album
+            .tracks
+            .iter()
+            .map(|t| QueueItem {
+                track: t.clone(),
+                item_id: album.item_id,
+                album_title: album.album_title.clone(),
+                artist_name: album.artist_name.clone(),
+                art_url: None,
+                about: None,
+                credits: None,
+                release_date: None,
+            })
+            .collect()
+    }
+
+    /// Selects the correct filtered position when no filter is active.
+    #[test]
+    fn sync_selects_track_no_filter() {
+        let mut app = App::new();
+        let album = make_album(1, &[1, 2, 3, 4, 5]);
+        app.albums.push(album);
+        app.selected_album_idx = Some(0);
+        app.track_filtered = (0..5).collect(); // no filter: [0,1,2,3,4]
+
+        let items = queue_items(&app.albums[0]);
+        app.queue.replace_all(items, 2); // start at track index 2 (track_num 3)
+
+        app.queue.next(); // advance to index 3 (track_num 4)
+        app.sync_track_state_to_queue();
+
+        assert_eq!(app.track_state.selected(), Some(3));
+    }
+
+    /// Selects the correct position within a sparse filtered list.
+    #[test]
+    fn sync_selects_track_with_filter() {
+        let mut app = App::new();
+        let album = make_album(1, &[1, 2, 3, 4, 5]);
+        app.albums.push(album);
+        app.selected_album_idx = Some(0);
+        // Filter keeps only album-track indices 1, 3 (track_nums 2, 4)
+        app.track_filtered = vec![1, 3];
+
+        let items = queue_items(&app.albums[0]);
+        app.queue.replace_all(items, 1); // start at track index 1 (track_num 2)
+
+        app.queue.next(); // advance to index 2... but track_num 3 is filtered out
+        // Advance once more to index 3 (track_num 4), which IS in track_filtered
+        app.queue.next();
+        app.sync_track_state_to_queue();
+
+        // track_num 4 is at track_filtered position 1 (track_filtered[1] == 3, album.tracks[3].track_num == 4)
+        assert_eq!(app.track_state.selected(), Some(1));
+    }
+
+    /// Does not change track_state when the playing album differs from the viewed album.
+    #[test]
+    fn sync_ignores_different_album() {
+        let mut app = App::new();
+        let album_a = make_album(1, &[1, 2, 3]);
+        let album_b = make_album(2, &[1, 2, 3]);
+        app.albums.push(album_a);
+        app.albums.push(album_b);
+
+        // Viewing album B
+        app.selected_album_idx = Some(1);
+        app.track_filtered = (0..3).collect();
+        app.track_state.select(Some(0));
+
+        // But playing album A
+        let items = queue_items(&app.albums[0]);
+        app.queue.replace_all(items, 0);
+        app.queue.next();
+
+        app.sync_track_state_to_queue();
+
+        // Selection in album B should be untouched
+        assert_eq!(app.track_state.selected(), Some(0));
+    }
+
+    /// Does not change track_state when the playing track has been filtered out.
+    #[test]
+    fn sync_ignores_filtered_out_track() {
+        let mut app = App::new();
+        let album = make_album(1, &[1, 2, 3, 4, 5]);
+        app.albums.push(album);
+        app.selected_album_idx = Some(0);
+        // Filter shows only track indices 0 and 4 (track_nums 1 and 5)
+        app.track_filtered = vec![0, 4];
+        app.track_state.select(Some(0));
+
+        let items = queue_items(&app.albums[0]);
+        app.queue.replace_all(items, 0);
+        app.queue.next(); // advance to index 1 (track_num 2) — not in track_filtered
+
+        app.sync_track_state_to_queue();
+
+        // track_num 2 is not visible; selection should stay at 0
+        assert_eq!(app.track_state.selected(), Some(0));
     }
 }
