@@ -17,10 +17,18 @@ I made it with Claude, but read every single line of code it produced.
 - Mouse support for clicking and scrolling between panes
 - Session persistence - remembers your selections and queue position
 
-## Usage
+## Installation
+
+On macOS via Homebrew:
 
 ```
-cargo run
+brew install erasmas/bcp/bcp
+```
+
+Or build from source:
+
+```
+cargo install --path .
 ```
 
 ## Authentication
