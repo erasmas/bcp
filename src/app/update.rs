@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use super::{App, AppMode, AppScreen, Column, LoginStep};
 use crate::bandcamp::models::Album;
+use crate::config;
 
 enum QueueOp {
     Append,
@@ -17,6 +18,7 @@ fn album_queue_items(album: &Album) -> Vec<QueueItem> {
             item_id: album.item_id,
             album_title: album.album_title.clone(),
             artist_name: album.artist_name.clone(),
+            item_url: album.item_url.clone(),
             art_url: album.art_url.clone(),
             about: album.about.clone(),
             credits: album.credits.clone(),
@@ -25,9 +27,14 @@ fn album_queue_items(album: &Album) -> Vec<QueueItem> {
         .collect()
 }
 
-/// Parse the bitrate from the first MP3 frame header.
-/// Returns e.g. "128 kbps" for CBR or "VBR" for variable-bitrate files.
-fn parse_mp3_bitrate(data: &[u8]) -> Option<String> {
+/// Parse the audio format/bitrate from file data.
+/// Returns e.g. "128 kbps" for CBR MP3, "VBR" for variable-bitrate MP3, or "FLAC" for FLAC.
+fn parse_audio_format(data: &[u8]) -> Option<String> {
+    // Check for FLAC magic bytes
+    if data.starts_with(b"fLaC") {
+        return Some("FLAC".to_string());
+    }
+
     // Skip ID3v2 tag if present
     let start = if data.starts_with(b"ID3") && data.len() >= 10 {
         let size = ((data[6] as usize) << 21)
@@ -122,7 +129,7 @@ impl Message {
             Self::DownloadAll => Some(("D", "download all")),
             // UI
             Self::ToggleSettings => Some(("?", "info")),
-            Self::ScrollSettings(_) => None,
+            Self::CycleFormat(_) | Self::ScrollSettings(_) => None,
             Self::Refresh => Some(("r", "refresh")),
             Self::Yank => Some(("y", "yank link")),
             // Internal (login, async results)
@@ -132,7 +139,8 @@ impl Message {
             Self::Mp3Ready(_) | Self::Mp3Failed(_) => None,
             Self::ArtReady(_) => None,
             Self::TrackFinished | Self::PlaybackError(_) => None,
-            Self::DownloadTrackDone { .. }
+            Self::DownloadProgress { .. }
+            | Self::DownloadTrackDone { .. }
             | Self::DownloadAlbumDone { .. }
             | Self::DownloadError { .. } => None,
         }
@@ -216,6 +224,7 @@ pub enum Message {
 
     // UI
     ToggleSettings,
+    CycleFormat(i8),
     ScrollSettings(i16),
     Refresh,
     Yank,
@@ -224,18 +233,37 @@ pub enum Message {
     ExtractCookie,
 
     // Async results
-    AlbumDetailLoaded { idx: usize, detail: AlbumDetail },
+    AlbumDetailLoaded {
+        idx: usize,
+        detail: AlbumDetail,
+    },
     AlbumDetailFailed(String),
-    PrefetchResult { idx: usize, detail: AlbumDetail },
+    PrefetchResult {
+        idx: usize,
+        detail: AlbumDetail,
+    },
     PrefetchDone,
     Mp3Ready(Vec<u8>),
     Mp3Failed(String),
     ArtReady(image::DynamicImage),
     TrackFinished,
     PlaybackError(String),
-    DownloadTrackDone { item_id: u64, track_num: u32 },
-    DownloadAlbumDone { item_id: u64 },
-    DownloadError { item_id: u64, msg: String },
+    DownloadProgress {
+        item_id: u64,
+        downloaded: u64,
+        total: Option<u64>,
+    },
+    DownloadTrackDone {
+        item_id: u64,
+        track_num: u32,
+    },
+    DownloadAlbumDone {
+        item_id: u64,
+    },
+    DownloadError {
+        item_id: u64,
+        msg: String,
+    },
 }
 
 impl App {
@@ -569,6 +597,9 @@ impl App {
                     _ => AppMode::Settings { scroll: 0 },
                 };
             }
+            Message::CycleFormat(delta) => {
+                config::cycle_download_format(delta);
+            }
             Message::ScrollSettings(delta) => {
                 if let AppMode::Settings { ref mut scroll } = self.mode {
                     if delta > 0 {
@@ -705,14 +736,14 @@ impl App {
             }
             Message::PrefetchDone => {
                 self.detail_rx = None;
-                let _ = cache::save_collection_cache(&self.albums);
+                let _ = cache::save_collection_cache(&self.albums, &self.redownload_urls);
                 self.status_msg = String::new();
                 self.dirty = true;
             }
 
             Message::Mp3Ready(data) => {
                 if let Some(ref engine) = self.engine {
-                    self.stream_bitrate = parse_mp3_bitrate(&data);
+                    self.stream_bitrate = parse_audio_format(&data);
                     engine.play(data)?;
                     self.is_paused = false;
                     self.play_started = Some(std::time::Instant::now());
@@ -746,6 +777,31 @@ impl App {
                 self.dirty = true;
             }
 
+            Message::DownloadProgress {
+                item_id,
+                downloaded,
+                total,
+            } => {
+                let album_name = self
+                    .library
+                    .albums
+                    .get(&item_id)
+                    .map(|a| a.album_title.as_str())
+                    .unwrap_or("album");
+                if let Some(total) = total {
+                    let mb_done = downloaded as f64 / (1024.0 * 1024.0);
+                    let mb_total = total as f64 / (1024.0 * 1024.0);
+                    let pct = (downloaded as f64 / total as f64 * 100.0) as u32;
+                    self.status_msg = format!(
+                        "Downloading {}: {:.1}/{:.1} MB ({}%)",
+                        album_name, mb_done, mb_total, pct
+                    );
+                } else {
+                    let mb = downloaded as f64 / (1024.0 * 1024.0);
+                    self.status_msg = format!("Downloading {}: {:.1} MB", album_name, mb);
+                }
+                self.dirty = true;
+            }
             Message::DownloadTrackDone { item_id, track_num } => {
                 if let Some(album) = self.library.albums.get_mut(&item_id)
                     && let Some(track) = album.tracks.iter_mut().find(|t| t.track_num == track_num)
@@ -926,6 +982,7 @@ impl App {
                     item_id: album.item_id,
                     album_title: album.album_title.clone(),
                     artist_name: album.artist_name.clone(),
+                    item_url: album.item_url.clone(),
                     art_url: album.art_url.clone(),
                     about: album.about.clone(),
                     credits: album.credits.clone(),

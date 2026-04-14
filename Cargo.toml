@@ -15,10 +15,12 @@ ratatui = "0.30"
 image = "0.25"
 ratatui-image = { version = "10.0", default-features = false, features = ["crossterm", "image-defaults"] }
 reqwest = { version = "0.12", features = ["json", "cookies", "stream"] }
-rodio = { version = "0.20", features = ["symphonia-mp3"] }
+rodio = { version = "0.21", default-features = false, features = ["playback", "symphonia-mp3", "symphonia-flac"] }
 rookie = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 scraper = "0.22"
 toml = "0.8"
 tokio = { version = "1", features = ["full"] }
+zip = "8.5.1"
+futures-util = "0.3.32"

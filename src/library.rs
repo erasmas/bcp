@@ -40,9 +40,22 @@ pub enum AlbumDownloadStatus {
 
 #[derive(Debug, Clone)]
 pub enum DownloadEvent {
-    TrackDone { item_id: u64, track_num: u32 },
-    AlbumDone { item_id: u64 },
-    Error { item_id: u64, msg: String },
+    Progress {
+        item_id: u64,
+        downloaded: u64,
+        total: Option<u64>,
+    },
+    TrackDone {
+        item_id: u64,
+        track_num: u32,
+    },
+    AlbumDone {
+        item_id: u64,
+    },
+    Error {
+        item_id: u64,
+        msg: String,
+    },
 }
 
 impl LibraryIndex {
@@ -76,6 +89,7 @@ impl LibraryIndex {
     }
 
     /// Get the local file path for a track, if it has been downloaded.
+    /// Checks multiple extensions since tracks may have been downloaded in different formats.
     pub fn track_path(&self, item_id: u64, track_num: u32) -> Option<PathBuf> {
         let album = self.albums.get(&item_id)?;
         let track = album.tracks.iter().find(|t| t.track_num == track_num)?;
@@ -84,8 +98,28 @@ impl LibraryIndex {
         }
         let base = config::library_dir().ok()?;
         let dir = album_dir(&base, &album.artist_name, &album.album_title);
+
+        // Check the stored filename first
         let path = dir.join(&track.file_name);
-        if path.exists() { Some(path) } else { None }
+        if path.exists() {
+            return Some(path);
+        }
+
+        // Check other extensions (format may have changed since download)
+        let stem = track
+            .file_name
+            .rsplit_once('.')
+            .map(|(s, _)| s)
+            .unwrap_or(&track.file_name);
+        for (fmt, _) in config::DOWNLOAD_FORMATS {
+            let ext = config::format_extension(fmt);
+            let alt = dir.join(format!("{}.{}", stem, ext));
+            if alt.exists() {
+                return Some(alt);
+            }
+        }
+
+        None
     }
 
     /// Check if an album is fully downloaded.
@@ -208,15 +242,15 @@ fn sanitize_filename(name: &str) -> String {
         .to_string()
 }
 
-fn track_filename(track_num: u32, title: &str) -> String {
-    format!("{:02} - {}.mp3", track_num, sanitize_filename(title))
+fn track_filename(track_num: u32, title: &str, ext: &str) -> String {
+    format!("{:02} - {}.{}", track_num, sanitize_filename(title), ext)
 }
 
-/// Spawn a background task to download an album's tracks.
-/// Returns a receiver for progress events.
+/// Spawn a background task to download an album's tracks in the configured format (e.g. FLAC).
 pub fn download_album(
     album: &Album,
     identity_cookie: &str,
+    download_page_url: Option<String>,
 ) -> Result<mpsc::UnboundedReceiver<DownloadEvent>> {
     let (tx, rx) = mpsc::unbounded_channel();
     let base = config::library_dir()?;
@@ -233,6 +267,7 @@ pub fn download_album(
     let album_title = album.album_title.clone();
     let art_url = album.art_url.clone();
     let cookie = identity_cookie.to_string();
+    let preferred_format = config::download_format();
 
     tokio::spawn(async move {
         let client = reqwest::Client::new();
@@ -242,61 +277,79 @@ pub fn download_album(
             let _ = download_cover(&artist, &album_title, art).await;
         }
 
-        // Download tracks sequentially
-        for (track_num, title, stream_url) in &tracks {
-            let Some(url) = stream_url else {
-                let _ = tx.send(DownloadEvent::Error {
-                    item_id,
-                    msg: format!("No stream URL for track {}", track_num),
-                });
-                continue;
+        // Try HQ download via download page first
+        let mut hq_ok = false;
+        if let Some(dl_url) = download_page_url
+            && let Some((url, fmt_key)) =
+                fetch_hq_download_url(&client, &cookie, &dl_url, &preferred_format).await
+        {
+            let ctx = HqDownloadCtx {
+                client: &client,
+                cookie: &cookie,
+                dir: &dir,
+                item_id,
+                tx: &tx,
             };
+            let hq_tracks: Vec<_> = tracks.iter().map(|(n, t, _)| (*n, t.clone())).collect();
+            hq_ok = download_and_extract_hq(&ctx, &url, &fmt_key, &hq_tracks).await;
+        }
 
-            let file_name = track_filename(*track_num, title);
-            let file_path = dir.join(&file_name);
+        // Fall back to stream URLs (mp3-128) for non-purchased or failed HQ downloads
+        if !hq_ok {
+            for (track_num, title, stream_url) in &tracks {
+                let Some(url) = stream_url else {
+                    let _ = tx.send(DownloadEvent::Error {
+                        item_id,
+                        msg: format!("No stream URL for track {}", track_num),
+                    });
+                    continue;
+                };
 
-            // Skip if already exists
-            if file_path.exists() {
-                let _ = tx.send(DownloadEvent::TrackDone {
-                    item_id,
-                    track_num: *track_num,
-                });
-                continue;
-            }
+                let file_name = track_filename(*track_num, title, "mp3");
+                let file_path = dir.join(&file_name);
 
-            let resp = client
-                .get(url)
-                .header("Cookie", format!("identity={}", cookie))
-                .send()
-                .await;
+                if file_path.exists() {
+                    let _ = tx.send(DownloadEvent::TrackDone {
+                        item_id,
+                        track_num: *track_num,
+                    });
+                    continue;
+                }
 
-            match resp {
-                Ok(resp) => match resp.bytes().await {
-                    Ok(bytes) => {
-                        if let Err(e) = std::fs::write(&file_path, &bytes) {
+                let resp = client
+                    .get(url)
+                    .header("Cookie", format!("identity={}", cookie))
+                    .send()
+                    .await;
+
+                match resp {
+                    Ok(resp) => match resp.bytes().await {
+                        Ok(bytes) => {
+                            if let Err(e) = std::fs::write(&file_path, &bytes) {
+                                let _ = tx.send(DownloadEvent::Error {
+                                    item_id,
+                                    msg: format!("Write error: {}", e),
+                                });
+                                continue;
+                            }
+                            let _ = tx.send(DownloadEvent::TrackDone {
+                                item_id,
+                                track_num: *track_num,
+                            });
+                        }
+                        Err(e) => {
                             let _ = tx.send(DownloadEvent::Error {
                                 item_id,
-                                msg: format!("Write error: {}", e),
+                                msg: format!("Download error: {}", e),
                             });
-                            continue;
                         }
-                        let _ = tx.send(DownloadEvent::TrackDone {
-                            item_id,
-                            track_num: *track_num,
-                        });
-                    }
+                    },
                     Err(e) => {
                         let _ = tx.send(DownloadEvent::Error {
                             item_id,
-                            msg: format!("Download error: {}", e),
+                            msg: format!("Request error: {}", e),
                         });
                     }
-                },
-                Err(e) => {
-                    let _ = tx.send(DownloadEvent::Error {
-                        item_id,
-                        msg: format!("Request error: {}", e),
-                    });
                 }
             }
         }
@@ -307,91 +360,309 @@ pub fn download_album(
     Ok(rx)
 }
 
-/// Spawn a background task to download a single track from an album.
-pub fn download_track(
-    album: &Album,
-    track_num: u32,
-    identity_cookie: &str,
-) -> Result<mpsc::UnboundedReceiver<DownloadEvent>> {
-    let (tx, rx) = mpsc::unbounded_channel();
-    let base = config::library_dir()?;
-    let dir = album_dir(&base, &album.artist_name, &album.album_title);
-    std::fs::create_dir_all(&dir)?;
+/// Fetch the HQ download URL from a Bandcamp download page.
+/// Returns (url, format_key) for the best available format.
+async fn fetch_hq_download_url(
+    client: &reqwest::Client,
+    cookie: &str,
+    download_page_url: &str,
+    preferred_format: &str,
+) -> Option<(String, String)> {
+    let resp = client
+        .get(download_page_url)
+        .header("Cookie", format!("identity={}", cookie))
+        .send()
+        .await
+        .ok()?;
+    let html = resp.text().await.ok()?;
+    let formats = crate::bandcamp::client::extract_download_formats(&html).ok()?;
 
-    let item_id = album.item_id;
-    let track = album
-        .tracks
-        .iter()
-        .find(|t| t.track_num == track_num)
-        .context("Track not found")?;
-    let title = track.title.clone();
-    let stream_url = track.stream_url.clone();
-    let cookie = identity_cookie.to_string();
-
-    tokio::spawn(async move {
-        let Some(url) = stream_url else {
-            let _ = tx.send(DownloadEvent::Error {
-                item_id,
-                msg: format!("No stream URL for track {}", track_num),
-            });
-            return;
-        };
-
-        let file_name = track_filename(track_num, &title);
-        let file_path = dir.join(&file_name);
-
-        if file_path.exists() {
-            let _ = tx.send(DownloadEvent::TrackDone { item_id, track_num });
-            return;
+    if let Some(dl) = formats.formats.get(preferred_format) {
+        return Some((dl.url.clone(), preferred_format.to_string()));
+    }
+    for (fmt, _) in config::DOWNLOAD_FORMATS {
+        if let Some(dl) = formats.formats.get(*fmt) {
+            return Some((dl.url.clone(), fmt.to_string()));
         }
+    }
+    None
+}
 
-        let client = reqwest::Client::new();
-        let resp = client
-            .get(&url)
-            .header("Cookie", format!("identity={}", cookie))
-            .send()
-            .await;
+struct HqDownloadCtx<'a> {
+    client: &'a reqwest::Client,
+    cookie: &'a str,
+    dir: &'a std::path::Path,
+    item_id: u64,
+    tx: &'a tokio::sync::mpsc::UnboundedSender<DownloadEvent>,
+}
 
-        match resp {
-            Ok(resp) => match resp.bytes().await {
-                Ok(bytes) => {
-                    if let Err(e) = std::fs::write(&file_path, &bytes) {
-                        let _ = tx.send(DownloadEvent::Error {
-                            item_id,
-                            msg: format!("Write error: {}", e),
-                        });
-                        return;
-                    }
-                    let _ = tx.send(DownloadEvent::TrackDone { item_id, track_num });
-                }
-                Err(e) => {
-                    let _ = tx.send(DownloadEvent::Error {
+/// Download a HQ album file (usually a ZIP), streaming to a temp file, then extract tracks.
+/// Returns true if the download and extraction succeeded (at least partially).
+async fn download_and_extract_hq(
+    ctx: &HqDownloadCtx<'_>,
+    url: &str,
+    fmt_key: &str,
+    tracks: &[(u32, String)],
+) -> bool {
+    use tokio::io::AsyncWriteExt;
+
+    let item_id = ctx.item_id;
+    let ext = config::format_extension(fmt_key);
+    const MAX_DOWNLOAD_SIZE: u64 = 2 * 1024 * 1024 * 1024; // 2 GB
+
+    let resp = match ctx
+        .client
+        .get(url)
+        .header("Cookie", format!("identity={}", ctx.cookie))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => {
+            let _ = ctx.tx.send(DownloadEvent::Error {
+                item_id,
+                msg: format!("Download failed: HTTP {}", r.status()),
+            });
+            return false;
+        }
+        Err(e) => {
+            let _ = ctx.tx.send(DownloadEvent::Error {
+                item_id,
+                msg: format!("Download request error: {}", e),
+            });
+            return false;
+        }
+    };
+
+    // Stream response body to a temp file with progress reporting
+    let total = resp.content_length();
+    if let Some(size) = total
+        && size > MAX_DOWNLOAD_SIZE
+    {
+        let _ = ctx.tx.send(DownloadEvent::Error {
+            item_id,
+            msg: format!("Download too large: {} MB", size / (1024 * 1024)),
+        });
+        return false;
+    }
+    let tmp_path = ctx.dir.join(format!(".download-{}.tmp", item_id));
+    let mut tmp_file = match tokio::fs::File::create(&tmp_path).await {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = ctx.tx.send(DownloadEvent::Error {
+                item_id,
+                msg: format!("Failed to create temp file: {}", e),
+            });
+            return false;
+        }
+    };
+
+    let mut downloaded: u64 = 0;
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(bytes) => {
+                downloaded += bytes.len() as u64;
+                if downloaded > MAX_DOWNLOAD_SIZE {
+                    let _ = ctx.tx.send(DownloadEvent::Error {
                         item_id,
-                        msg: format!("Download error: {}", e),
+                        msg: format!(
+                            "Download exceeded size limit: {} MB",
+                            downloaded / (1024 * 1024)
+                        ),
                     });
+                    drop(tmp_file);
+                    let _ = tokio::fs::remove_file(&tmp_path).await;
+                    return false;
                 }
-            },
-            Err(e) => {
-                let _ = tx.send(DownloadEvent::Error {
+                if let Err(e) = tmp_file.write_all(&bytes).await {
+                    let _ = ctx.tx.send(DownloadEvent::Error {
+                        item_id,
+                        msg: format!("Write error: {}", e),
+                    });
+                    let _ = tokio::fs::remove_file(&tmp_path).await;
+                    return false;
+                }
+                let _ = ctx.tx.send(DownloadEvent::Progress {
                     item_id,
-                    msg: format!("Request error: {}", e),
+                    downloaded,
+                    total,
                 });
             }
+            Err(e) => {
+                let _ = ctx.tx.send(DownloadEvent::Error {
+                    item_id,
+                    msg: format!("Download stream error: {}", e),
+                });
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return false;
+            }
         }
-    });
+    }
+    drop(tmp_file);
 
-    Ok(rx)
+    // Extract on a blocking thread to avoid starving the tokio executor
+    let tmp_path_clone = tmp_path.clone();
+    let dir_clone = ctx.dir.to_path_buf();
+    let ext_owned = ext.to_string();
+    let tracks_owned = tracks.to_vec();
+    let tx_clone = ctx.tx.clone();
+
+    let extract_result = tokio::task::spawn_blocking(move || {
+        extract_downloaded_file(
+            &tmp_path_clone,
+            &dir_clone,
+            &ext_owned,
+            &tracks_owned,
+            item_id,
+            &tx_clone,
+        )
+    })
+    .await;
+
+    match extract_result {
+        Ok(moved_tmp) => {
+            // If extract_downloaded_file renamed the temp file (raw audio),
+            // it's already gone - no cleanup needed
+            if !moved_tmp {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+            }
+            true
+        }
+        Err(e) => {
+            let _ = ctx.tx.send(DownloadEvent::Error {
+                item_id,
+                msg: format!("Extraction task failed: {}", e),
+            });
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            false
+        }
+    }
+}
+
+/// Extract tracks from a downloaded file (ZIP or raw audio). Runs on a blocking thread.
+/// Returns true if the temp file was moved (renamed) and should not be deleted by the caller.
+fn extract_downloaded_file(
+    tmp_path: &std::path::Path,
+    dir: &std::path::Path,
+    ext: &str,
+    tracks: &[(u32, String)],
+    item_id: u64,
+    tx: &tokio::sync::mpsc::UnboundedSender<DownloadEvent>,
+) -> bool {
+    let file = match std::fs::File::open(tmp_path) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = tx.send(DownloadEvent::Error {
+                item_id,
+                msg: format!("Failed to open download: {}", e),
+            });
+            return false;
+        }
+    };
+
+    if let Ok(mut archive) = zip::ZipArchive::new(&file) {
+        // ZIP archive - extract individual tracks
+        for i in 0..archive.len() {
+            let mut entry = match archive.by_index(i) {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
+            let zip_name = entry.name().to_string();
+
+            if entry.is_dir() || zip_name.ends_with('/') {
+                continue;
+            }
+
+            if let Some((track_num, title)) = match_zip_entry_to_track(&zip_name, tracks) {
+                let out_name = track_filename(track_num, &title, ext);
+                let out_path = dir.join(&out_name);
+                if out_path.exists() {
+                    let _ = tx.send(DownloadEvent::TrackDone { item_id, track_num });
+                    continue;
+                }
+
+                let mut out_file = match std::fs::File::create(&out_path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        let _ = tx.send(DownloadEvent::Error {
+                            item_id,
+                            msg: format!("Failed to create file for track {}: {}", track_num, e),
+                        });
+                        continue;
+                    }
+                };
+                match std::io::copy(&mut entry, &mut out_file) {
+                    Ok(_) => {
+                        let _ = tx.send(DownloadEvent::TrackDone { item_id, track_num });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(DownloadEvent::Error {
+                            item_id,
+                            msg: format!("Failed to extract track {}: {}", track_num, e),
+                        });
+                    }
+                }
+            }
+        }
+        false
+    } else {
+        // Raw audio file (single track purchase) - just rename the temp file
+        if let Some((track_num, title)) = tracks.first() {
+            let out_name = track_filename(*track_num, title, ext);
+            let out_path = dir.join(&out_name);
+            if std::fs::rename(tmp_path, &out_path).is_ok() {
+                let _ = tx.send(DownloadEvent::TrackDone {
+                    item_id,
+                    track_num: *track_num,
+                });
+                return true; // temp file was moved, caller should not delete it
+            }
+        }
+        false
+    }
+}
+
+/// Match a ZIP archive entry name to a track by looking for the track number prefix.
+/// Bandcamp names files like "Artist - Album - 01 Title.flac".
+fn match_zip_entry_to_track(zip_name: &str, tracks: &[(u32, String)]) -> Option<(u32, String)> {
+    // Get the filename without directory
+    let file_name = zip_name.rsplit('/').next().unwrap_or(zip_name);
+
+    // Extract the part after the last " - " separator, which is where Bandcamp
+    // puts "01 Title.flac". Fall back to the full filename.
+    let track_part = file_name
+        .rfind(" - ")
+        .map(|pos| &file_name[pos + 3..])
+        .unwrap_or(file_name);
+
+    // Match track number at the start of the track part
+    for (track_num, title) in tracks {
+        let num_str = format!("{:02}", track_num);
+        if track_part.starts_with(&format!("{} ", num_str))
+            || track_part.starts_with(&format!("{}.", num_str))
+            || track_part.starts_with(&format!("{}-", num_str))
+            || track_part.starts_with(&format!("{}_", num_str))
+        {
+            return Some((*track_num, title.clone()));
+        }
+    }
+
+    None
 }
 
 /// Prepare the library index entry for an album that's about to be downloaded.
 pub fn prepare_album_entry(album: &Album) -> DownloadedAlbum {
+    let fmt = config::download_format();
+    let ext = config::format_extension(&fmt);
     let tracks = album
         .tracks
         .iter()
         .map(|t| DownloadedTrack {
             track_num: t.track_num,
             title: t.title.clone(),
-            file_name: track_filename(t.track_num, &t.title),
+            file_name: track_filename(t.track_num, &t.title, ext),
             downloaded: false,
             duration: t.duration,
         })

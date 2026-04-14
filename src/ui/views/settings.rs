@@ -37,6 +37,7 @@ impl<'a> Widget for SettingsView<'a> {
         let inner = block.inner(area);
         block.render(area, buf);
 
+        let dl_format = config::download_format();
         let mut all_lines: Vec<Line> = vec![
             Line::from(""),
             Line::from(vec![
@@ -54,6 +55,12 @@ impl<'a> Widget for SettingsView<'a> {
             Line::from(vec![
                 Span::styled("  Downloaded:   ", theme::dim()),
                 Span::styled(format!("{} albums", self.downloaded_count), theme::normal()),
+            ]),
+            Line::from(vec![
+                Span::styled("  Format:       ", theme::dim()),
+                Span::styled("< ", theme::dim()),
+                Span::styled(config::format_description(&dl_format), theme::selected()),
+                Span::styled(" >", theme::dim()),
             ]),
             Line::from(""),
             Line::from(Span::styled("  Paths", theme::selected())),
@@ -77,7 +84,7 @@ impl<'a> Widget for SettingsView<'a> {
 
         // Render keybindings as text lines so they participate in Paragraph scroll.
         let bindings = Message::all_keybindings();
-        let col_width = 28usize;
+        let col_width = 30usize;
         let num_cols = ((inner.width as usize) / col_width).max(1);
         let num_rows = bindings.len().div_ceil(num_cols);
 
@@ -86,9 +93,9 @@ impl<'a> Widget for SettingsView<'a> {
             for col in 0..num_cols {
                 let idx = col * num_rows + row;
                 if let Some((key, desc)) = bindings.get(idx) {
-                    spans.push(Span::styled(format!("{:<8}", key), theme::normal()));
+                    spans.push(Span::styled(format!("{:<12}", key), theme::normal()));
                     spans.push(Span::styled(
-                        format!("{:<width$}", desc, width = col_width - 8),
+                        format!("{:<width$}", desc, width = col_width - 12),
                         theme::dim(),
                     ));
                 }

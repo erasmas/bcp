@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::{App, Column};
 use crate::library;
@@ -46,12 +46,47 @@ impl App {
             self.status_msg = format!("Buffering: {} - {}...", item.artist_name, item.track.title);
 
             let stream_url = url.clone();
+            let album_url = item.item_url.clone();
+            let track_num = item.track.track_num;
+            let cookie = self
+                .auth
+                .as_ref()
+                .map(|a| a.identity_cookie.clone())
+                .unwrap_or_default();
             let (mp3_tx, mp3_rx) = tokio::sync::oneshot::channel();
             self.mp3_rx = Some(mp3_rx);
             tokio::spawn(async move {
                 let client = reqwest::Client::new();
                 let result = async {
-                    let resp = client.get(&stream_url).send().await?;
+                    let mut req = client.get(&stream_url);
+                    if !cookie.is_empty() {
+                        req = req.header("Cookie", format!("identity={}", cookie));
+                    }
+                    let resp = req.send().await?;
+                    if resp.status() == reqwest::StatusCode::GONE {
+                        // Stream URL expired - re-fetch album page for fresh URLs
+                        let cookie_header = if cookie.is_empty() {
+                            String::new()
+                        } else {
+                            format!("identity={}", cookie)
+                        };
+                        let detail =
+                            crate::bandcamp::client::BandcampClient::fetch_album_details_static(
+                                &client,
+                                &cookie_header,
+                                &album_url,
+                            )
+                            .await?;
+                        let track = detail
+                            .tracks
+                            .iter()
+                            .find(|t| t.track_num == track_num)
+                            .and_then(|t| t.stream_url.as_ref())
+                            .context("No stream URL after refresh")?;
+                        let resp = client.get(track).send().await?;
+                        let bytes = resp.bytes().await?;
+                        return Ok(bytes.to_vec());
+                    }
                     let bytes = resp.bytes().await?;
                     Ok(bytes.to_vec()) as Result<Vec<u8>>
                 }
@@ -186,12 +221,24 @@ impl App {
         Ok(())
     }
 
+    /// Resolve the download page URL for an album by its sale_item_id.
+    fn download_url_for(&self, album: &crate::bandcamp::models::Album) -> Option<String> {
+        // Try sale_item_id first, then item_id (which is often the sale_item_id
+        // due to how fetch_full_collection prefers sale_item_id as the id)
+        if let Some(sale_id) = album.sale_item_id
+            && let Some(url) = self.redownload_urls.get(&sale_id)
+        {
+            return Some(url.clone());
+        }
+        self.redownload_urls.get(&album.item_id).cloned()
+    }
+
     /// Context-sensitive download based on focused column.
     pub(crate) async fn download_context(&mut self) {
         match self.focus {
             Column::Artists => self.download_artist_albums().await,
             Column::Albums => self.download_selected_album().await,
-            Column::Tracks | Column::Queue => self.download_selected_track().await,
+            Column::Tracks | Column::Queue => self.download_selected_album().await,
         }
     }
 
@@ -240,7 +287,8 @@ impl App {
             let entry = library::prepare_album_entry(album);
             self.library.albums.insert(album.item_id, entry);
 
-            if let Ok(rx) = library::download_album(album, &cookie) {
+            let dl_url = self.download_url_for(album);
+            if let Ok(rx) = library::download_album(album, &cookie, dl_url) {
                 self.download_rx.push(rx);
                 count += 1;
             }
@@ -300,64 +348,12 @@ impl App {
         self.library.albums.insert(album.item_id, entry);
         let _ = self.library.save();
 
-        match library::download_album(album, cookie) {
+        let dl_url = self.download_url_for(album);
+        match library::download_album(album, cookie, dl_url) {
             Ok(rx) => {
                 self.download_rx.push(rx);
                 self.status_msg =
                     format!("Downloading: {} - {}", album.artist_name, album.album_title);
-            }
-            Err(e) => {
-                self.status_msg = format!("Download error: {}", e);
-            }
-        }
-        self.dirty = true;
-    }
-
-    async fn download_selected_track(&mut self) {
-        let Some(album_idx) = self.selected_album_idx else {
-            return;
-        };
-        let Some(selected) = self.track_state.selected() else {
-            return;
-        };
-        let Some(&track_idx) = self.track_filtered.get(selected) else {
-            return;
-        };
-
-        let album = &self.albums[album_idx];
-        let Some(track) = album.tracks.get(track_idx) else {
-            return;
-        };
-
-        if self
-            .library
-            .is_track_downloaded(album.item_id, track.track_num)
-        {
-            self.status_msg = "Track already downloaded".to_string();
-            return;
-        }
-
-        let cookie = self
-            .auth
-            .as_ref()
-            .map(|a| a.identity_cookie.as_str())
-            .unwrap_or("");
-
-        // Ensure album entry exists in library
-        if let std::collections::hash_map::Entry::Vacant(e) =
-            self.library.albums.entry(album.item_id)
-        {
-            e.insert(library::prepare_album_entry(album));
-            let _ = self.library.save();
-        }
-
-        let track_num = track.track_num;
-        let track_title = track.title.clone();
-
-        match library::download_track(album, track_num, cookie) {
-            Ok(rx) => {
-                self.download_rx.push(rx);
-                self.status_msg = format!("Downloading track: {}", track_title);
             }
             Err(e) => {
                 self.status_msg = format!("Download error: {}", e);
@@ -407,7 +403,8 @@ impl App {
             let entry = library::prepare_album_entry(album);
             self.library.albums.insert(album.item_id, entry);
 
-            if let Ok(rx) = library::download_album(album, &cookie) {
+            let dl_url = self.download_url_for(album);
+            if let Ok(rx) = library::download_album(album, &cookie, dl_url) {
                 self.download_rx.push(rx);
                 count += 1;
             }
@@ -445,6 +442,7 @@ mod tests {
             about: None,
             credits: None,
             release_date: None,
+            sale_item_id: None,
         }
     }
 
@@ -457,6 +455,7 @@ mod tests {
                 item_id: album.item_id,
                 album_title: album.album_title.clone(),
                 artist_name: album.artist_name.clone(),
+                item_url: album.item_url.clone(),
                 art_url: None,
                 about: None,
                 credits: None,

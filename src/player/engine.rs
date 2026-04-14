@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use rodio::{Decoder, OutputStream, Sink};
 use std::io::Cursor;
 use tokio::sync::mpsc;
 
@@ -77,7 +77,7 @@ fn audio_thread(
     mut cmd_rx: mpsc::UnboundedReceiver<PlayerCommand>,
     event_tx: mpsc::UnboundedSender<PlayerEvent>,
 ) {
-    let Ok((_stream, stream_handle)) = OutputStream::try_default() else {
+    let Ok(stream) = rodio::OutputStreamBuilder::open_default_stream() else {
         let _ = event_tx.send(PlayerEvent::Error("Failed to open audio output".into()));
         return;
     };
@@ -98,7 +98,7 @@ fn audio_thread(
                     if let Some(ref sink) = current_sink {
                         sink.stop();
                     }
-                    match play_mp3(&stream_handle, &data) {
+                    match play_mp3(&stream, &data) {
                         Ok(sink) => {
                             current_sink = Some(sink);
                             let _ = event_tx.send(PlayerEvent::Started);
@@ -142,10 +142,44 @@ fn audio_thread(
     }
 }
 
-fn play_mp3(stream_handle: &OutputStreamHandle, data: &[u8]) -> Result<Sink> {
+fn play_mp3(stream: &OutputStream, data: &[u8]) -> Result<Sink> {
+    let len = data.len() as u64;
     let cursor = Cursor::new(data.to_vec());
-    let source = Decoder::new(cursor).context("Failed to decode MP3 data")?;
-    let sink = Sink::try_new(stream_handle).context("Failed to create audio sink")?;
+    let source = Decoder::builder()
+        .with_data(cursor)
+        .with_byte_len(len)
+        .with_seekable(true)
+        .build()
+        .context("Failed to decode audio data")?;
+    let sink = rodio::Sink::connect_new(stream.mixer());
     sink.append(source);
     Ok(sink)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_flac_seek_in_memory() {
+        let flac_data = include_bytes!("../../tests/fixtures/test.flac");
+
+        // Initialise audio just to get the stream handle (required for Sink).
+        // Skip the test on hosts without an audio device (e.g. CI runners).
+        let stream = match rodio::OutputStreamBuilder::open_default_stream() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Skipping test_flac_seek_in_memory: no audio device ({e})");
+                return;
+            }
+        };
+
+        // Attempt decoding and seeking via the player's stream load mechanism
+        let sink = play_mp3(&stream, flac_data).expect("Failed to play FLAC");
+
+        // Attempt to seek to 0.5s into the track stream
+        sink.try_seek(Duration::from_millis(500))
+            .expect("Failed to seek FLAC cursor");
+    }
 }

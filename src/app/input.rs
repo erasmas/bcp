@@ -28,6 +28,8 @@ impl App {
                     KeyCode::Char('q') => Some(Message::Quit),
                     KeyCode::Char('j') | KeyCode::Down => Some(Message::ScrollSettings(1)),
                     KeyCode::Char('k') | KeyCode::Up => Some(Message::ScrollSettings(-1)),
+                    KeyCode::Char('h') | KeyCode::Left => Some(Message::CycleFormat(-1)),
+                    KeyCode::Char('l') | KeyCode::Right => Some(Message::CycleFormat(1)),
                     _ => None,
                 },
                 AppMode::Filter => {
@@ -86,7 +88,6 @@ impl App {
             }
             KeyCode::Char('h') | KeyCode::Left => Some(Message::FocusLeft),
             KeyCode::Char('l') | KeyCode::Right => Some(Message::FocusRight),
-            KeyCode::Char('?') => Some(Message::ToggleSettings),
             KeyCode::Char('a') => Some(Message::AppendToQueue),
             KeyCode::Char('A') => Some(Message::InsertNext),
             KeyCode::Char('d') => Some(Message::Download),
@@ -113,6 +114,10 @@ impl App {
             KeyCode::Char('K') => Some(Message::ScrollMetaUp),
             KeyCode::Char('r') => Some(Message::Refresh),
             KeyCode::Char('y') => Some(Message::Yank),
+            KeyCode::Char('?') => Some(Message::ToggleSettings),
+            KeyCode::Char('/') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                Some(Message::ToggleSettings)
+            }
             KeyCode::Char('/') => Some(Message::StartFilter),
             _ => None,
         }
