@@ -114,6 +114,7 @@ impl App {
             KeyCode::Char('K') => Some(Message::ScrollMetaUp),
             KeyCode::Char('r') => Some(Message::Refresh),
             KeyCode::Char('y') => Some(Message::Yank),
+            KeyCode::Char('?') => Some(Message::ToggleSettings),
             KeyCode::Char('/') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 Some(Message::ToggleSettings)
             }
