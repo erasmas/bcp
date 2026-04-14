@@ -165,8 +165,15 @@ mod tests {
     fn test_flac_seek_in_memory() {
         let flac_data = include_bytes!("../../tests/fixtures/test.flac");
 
-        // Initialise audio just to get the stream handle (required for Sink)
-        let stream = rodio::OutputStreamBuilder::open_default_stream().unwrap();
+        // Initialise audio just to get the stream handle (required for Sink).
+        // Skip the test on hosts without an audio device (e.g. CI runners).
+        let stream = match rodio::OutputStreamBuilder::open_default_stream() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Skipping test_flac_seek_in_memory: no audio device ({e})");
+                return;
+            }
+        };
 
         // Attempt decoding and seeking via the player's stream load mechanism
         let sink = play_mp3(&stream, flac_data).expect("Failed to play FLAC");
