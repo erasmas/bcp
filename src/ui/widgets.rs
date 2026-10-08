@@ -79,11 +79,9 @@ pub fn draw_vscrollbar(
     let thumb_h = ((visible * track_h) / total).max(1).min(track_h);
     let max_scroll = total.saturating_sub(visible);
     let max_thumb_off = track_h - thumb_h;
-    let thumb_y = if max_scroll == 0 {
-        0
-    } else {
-        (offset * max_thumb_off + max_scroll / 2) / max_scroll
-    };
+    let thumb_y = (offset * max_thumb_off + max_scroll / 2)
+        .checked_div(max_scroll)
+        .unwrap_or(0);
 
     let thumb_style = if focused {
         theme::selected()

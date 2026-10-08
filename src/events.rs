@@ -32,11 +32,7 @@ impl EventHandler {
                                 break;
                             }
                         }
-                        Ok(Event::Resize(_, _)) => {
-                            if tx.send(AppEvent::Resize).is_err() {
-                                break;
-                            }
-                        }
+                        Ok(Event::Resize(_, _)) if tx.send(AppEvent::Resize).is_err() => break,
                         _ => {}
                     }
                 } else if tx.send(AppEvent::Tick).is_err() {
