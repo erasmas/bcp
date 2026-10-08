@@ -257,7 +257,7 @@ impl App {
 
         // Fetch details for albums that need it
         for &idx in &artist_albums {
-            if self.albums[idx].tracks.is_empty()
+            if needs_track_refresh(&self.albums[idx])
                 && !self.library.is_downloaded(self.albums[idx].item_id)
             {
                 let url = self.albums[idx].item_url.clone();
@@ -318,7 +318,7 @@ impl App {
             return;
         }
 
-        if self.albums[idx].tracks.is_empty() {
+        if needs_track_refresh(&self.albums[idx]) {
             self.status_msg = "Fetching album details...".to_string();
             self.dirty = true;
             let url = self.albums[idx].item_url.clone();
@@ -374,7 +374,7 @@ impl App {
             .albums
             .iter()
             .enumerate()
-            .filter(|(_, a)| a.tracks.is_empty() && !self.library.is_downloaded(a.item_id))
+            .filter(|(_, a)| needs_track_refresh(a) && !self.library.is_downloaded(a.item_id))
             .map(|(i, _)| i)
             .collect();
 
@@ -414,6 +414,10 @@ impl App {
         self.status_msg = format!("Downloading {} albums...", count);
         self.dirty = true;
     }
+}
+
+fn needs_track_refresh(album: &crate::bandcamp::models::Album) -> bool {
+    album.tracks.is_empty() || album.tracks.iter().any(|t| t.stream_url.is_none())
 }
 
 #[cfg(test)]

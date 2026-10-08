@@ -323,7 +323,7 @@ pub fn download_album(
                     .send()
                     .await;
 
-                match resp {
+                match resp.and_then(|r| r.error_for_status()) {
                     Ok(resp) => match resp.bytes().await {
                         Ok(bytes) => {
                             if let Err(e) = std::fs::write(&file_path, &bytes) {
@@ -628,24 +628,21 @@ fn extract_downloaded_file(
 /// Match a ZIP archive entry name to a track by looking for the track number prefix.
 /// Bandcamp names files like "Artist - Album - 01 Title.flac".
 fn match_zip_entry_to_track(zip_name: &str, tracks: &[(u32, String)]) -> Option<(u32, String)> {
-    // Get the filename without directory
     let file_name = zip_name.rsplit('/').next().unwrap_or(zip_name);
 
-    // Extract the part after the last " - " separator, which is where Bandcamp
-    // puts "01 Title.flac". Fall back to the full filename.
-    let track_part = file_name
-        .rfind(" - ")
-        .map(|pos| &file_name[pos + 3..])
-        .unwrap_or(file_name);
+    let separator_offsets = file_name.match_indices(" - ").map(|(pos, _)| pos + 3);
+    let candidates = std::iter::once(0).chain(separator_offsets);
 
-    // Match track number at the start of the track part
-    for (track_num, title) in tracks {
-        let num_str = format!("{:02}", track_num);
-        if track_part.starts_with(&format!("{} ", num_str))
-            || track_part.starts_with(&format!("{}.", num_str))
-            || track_part.starts_with(&format!("{}-", num_str))
-            || track_part.starts_with(&format!("{}_", num_str))
-        {
+    for offset in candidates {
+        let track_part = &file_name[offset..];
+        for (track_num, title) in tracks {
+            let num_str = format!("{:02}", track_num);
+            if ![" ", ".", "-", "_"]
+                .iter()
+                .any(|sep| track_part.starts_with(&format!("{}{}", num_str, sep)))
+            {
+                continue;
+            }
             return Some((*track_num, title.clone()));
         }
     }
@@ -675,5 +672,30 @@ pub fn prepare_album_entry(album: &Album) -> DownloadedAlbum {
         artist_name: album.artist_name.clone(),
         tracks,
         status: AlbumDownloadStatus::Downloading,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_zip_entry_when_track_title_contains_separator() {
+        let tracks = vec![
+            (1, "Truckfighters - The Gorgon".to_string()),
+            (2, "Robot God - Cerebral Annihilation".to_string()),
+        ];
+        let matched = match_zip_entry_to_track(
+            "WEEDIAN - The Best Releases of February 2026 - 02 Robot God - Cerebral Annihilation.mp3",
+            &tracks,
+        );
+        assert_eq!(matched.map(|(n, _)| n), Some(2));
+    }
+
+    #[test]
+    fn matches_zip_entry_with_plain_title() {
+        let tracks = vec![(1, "Intro".to_string())];
+        let matched = match_zip_entry_to_track("Artist - Album - 01 Intro.flac", &tracks);
+        assert_eq!(matched.map(|(n, _)| n), Some(1));
     }
 }
