@@ -49,7 +49,7 @@ impl BandcampClient {
             anyhow::bail!("Session expired - please run `bcp login` to re-authenticate");
         }
         if !status.is_success() {
-            anyhow::bail!("Collection summary API returned {}: {}", status, &body);
+            anyhow::bail!("Collection summary API returned {}: {}", status, body);
         }
 
         let data: serde_json::Value =

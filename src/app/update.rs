@@ -661,6 +661,7 @@ impl App {
                 let album = &self.albums[idx];
                 let meta = library::AlbumMetadata {
                     item_id: album.item_id,
+                    url: Some(album.item_url.clone()),
                     tracks: album
                         .tracks
                         .iter()
@@ -698,6 +699,7 @@ impl App {
                 let album = &self.albums[idx];
                 let meta = library::AlbumMetadata {
                     item_id: album.item_id,
+                    url: Some(album.item_url.clone()),
                     tracks: album
                         .tracks
                         .iter()
@@ -812,9 +814,20 @@ impl App {
             }
             Message::DownloadAlbumDone { item_id } => {
                 if let Some(album) = self.library.albums.get_mut(&item_id) {
-                    album.status = library::AlbumDownloadStatus::Complete;
-                    self.status_msg =
-                        format!("Downloaded: {} - {}", album.artist_name, album.album_title);
+                    let all_downloaded = album.tracks.iter().all(|t| t.downloaded);
+                    album.status = if all_downloaded {
+                        library::AlbumDownloadStatus::Complete
+                    } else {
+                        library::AlbumDownloadStatus::Partial
+                    };
+                    self.status_msg = if all_downloaded {
+                        format!("Downloaded: {} - {}", album.artist_name, album.album_title)
+                    } else {
+                        format!(
+                            "Incomplete download: {} - {}",
+                            album.artist_name, album.album_title
+                        )
+                    };
                 }
                 let _ = self.library.save();
                 self.dirty = true;
