@@ -661,6 +661,7 @@ impl App {
                 let album = &self.albums[idx];
                 let meta = library::AlbumMetadata {
                     item_id: album.item_id,
+                    url: Some(album.item_url.clone()),
                     tracks: album
                         .tracks
                         .iter()
@@ -698,6 +699,7 @@ impl App {
                 let album = &self.albums[idx];
                 let meta = library::AlbumMetadata {
                     item_id: album.item_id,
+                    url: Some(album.item_url.clone()),
                     tracks: album
                         .tracks
                         .iter()

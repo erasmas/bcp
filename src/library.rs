@@ -164,6 +164,7 @@ fn album_dir(base: &std::path::Path, artist: &str, title: &str) -> PathBuf {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AlbumMetadata {
     pub item_id: u64,
+    pub url: Option<String>,
     pub tracks: Vec<TrackMetadata>,
     pub about: Option<String>,
     pub credits: Option<String>,
